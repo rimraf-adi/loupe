@@ -1,0 +1,13 @@
+---
+source: crates/loupe-symbols/tests/golden.rs
+expression: detailed(& symbols)
+---
+constant  public    MaxConns           parent=-          L6-6  | const MaxConns = 100
+constant  private   internalLimit      parent=-          L8-8  | const internalLimit = 5
+struct    public    Server             parent=-          L11-13  | type Server struct
+interface public    Handler            parent=-          L16-18  | type Handler interface
+type      public    ID                 parent=-          L20-20  | type ID int
+function  public    New                parent=-          L23-26  | func New(port int) *Server  /// New creates a Server.
+method    public    Run                parent=-          L29-32  | func (s *Server) Run() error  /// Run starts the server.
+method    private   helper             parent=-          L34-34  | func (s Server) helper()
+function  private   internalFunc       parent=-          L36-36  | func internalFunc()

@@ -1,0 +1,13 @@
+---
+source: crates/loupe-symbols/tests/golden.rs
+expression: "render_outline(& symbols, & OutlineOptions :: default())"
+---
+public interface Shape  L4-6  // A shape.
+  double area();  L5
+public enum Color  L8-10
+public class Circle implements Shape  L13-32  // A circle.
+  public Circle(double radius)  L16-18
+  @Override public double area()  L20-23
+  private static void helper()  L25
+  void packagePrivate()  L27
+  protected String describe()  L29-31

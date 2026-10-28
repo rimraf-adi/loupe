@@ -1,0 +1,27 @@
+---
+source: crates/loupe-symbols/tests/golden.rs
+expression: detailed(& symbols)
+---
+struct    public    Server             parent=-          L9-11  | pub struct Server  /// A server that does things. /  / Second paragraph.
+constant  public    MAX_CONNECTIONS    parent=-          L13-13  | pub const MAX_CONNECTIONS: usize = 1024;
+constant  private   COUNTER            parent=-          L14-14  | static COUNTER: u32 = 0;
+type      public    Handler            parent=-          L16-16  | pub type Handler = Box<dyn Fn(&str) -> String>;
+trait     public    Service            parent=-          L19-25  | pub trait Service  /// Behavior shared by services.
+method    public    start              parent=Service    L21-21  | fn start(&self) -> Result<(), String>;  /// Start the service.
+method    public    name               parent=Service    L22-24  | fn name(&self) -> &str
+impl      unknown   Server             parent=-          L27-40  | impl Server
+method    public    new                parent=Server     L29-32  | pub fn new(port: u16) -> Self  /// Create a server.
+method    private   private_helper     parent=Server     L34-34  | fn private_helper(&self)
+method    public    run                parent=Server     L36-39  | pub async fn run(&self) -> std::io::Result<()>
+function  private   nested_fn          parent=run        L37-37  | fn nested_fn()
+impl      unknown   Server             parent=-          L42-46  | impl Service for Server
+method    public    start              parent=Server     L43-45  | fn start(&self) -> Result<(), String>
+impl      unknown   Wrapper<T>         parent=-          L48-52  | impl<T: fmt::Debug> fmt::Display for Wrapper<T>
+method    public    fmt                parent=Wrapper<T> L49-51  | fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
+enum      public    Mode               parent=-          L54-57  | pub enum Mode
+module    public    inner              parent=-          L59-65  | pub mod inner
+function  public    deep               parent=inner      L60-60  | pub fn deep()
+module    private   hidden             parent=inner      L62-64  | mod hidden
+struct    public    Secret             parent=hidden     L63-63  | pub struct Secret;
+macro     private   make_thing         parent=-          L67-69  | macro_rules! make_thing
+function  public    generic            parent=-          L71-76  | pub fn generic<T>(items: Vec<T>) -> usize where T: Clone,

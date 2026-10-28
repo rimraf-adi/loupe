@@ -1,0 +1,13 @@
+---
+source: crates/loupe-symbols/tests/golden.rs
+expression: "render_outline(& symbols, & OutlineOptions :: default())"
+---
+const MaxConns = 100  L6
+const internalLimit = 5  L8
+type Server struct  L11-13
+type Handler interface  L16-18
+type ID int  L20
+func New(port int) *Server  L23-26  // New creates a Server.
+func (s *Server) Run() error  L29-32  // Run starts the server.
+func (s Server) helper()  L34
+func internalFunc()  L36

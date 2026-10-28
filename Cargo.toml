@@ -1,0 +1,65 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+# Internal crates
+loupe-core = { path = "crates/loupe-core" }
+loupe-walk = { path = "crates/loupe-walk" }
+loupe-store = { path = "crates/loupe-store" }
+loupe-text = { path = "crates/loupe-text" }
+loupe-symbols = { path = "crates/loupe-symbols" }
+loupe-graph = { path = "crates/loupe-graph" }
+loupe-embed = { path = "crates/loupe-embed" }
+loupe-map = { path = "crates/loupe-map" }
+loupe-overlay = { path = "crates/loupe-overlay" }
+loupe-query = { path = "crates/loupe-query" }
+loupe-proto = { path = "crates/loupe-proto" }
+loupe-api = { path = "crates/loupe-api" }
+loupe-daemon = { path = "crates/loupe-daemon" }
+loupe-mcp = { path = "crates/loupe-mcp" }
+
+# External: add each in the milestone that uses it.
+anyhow = "1"
+blake3 = "1"
+clap = { version = "4", features = ["derive", "env"] }
+fst = "0.4"
+ignore = "0.4"
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+memmap2 = "0.9"
+nucleo-matcher = "0.3"
+proptest = "1"
+rayon = "1"
+rmp-serde = "1"
+arc-swap = "1"
+regex = "1"
+regex-syntax = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+debug = "line-tables-only"
+
+[profile.bench]
+inherits = "release"

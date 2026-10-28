@@ -1,0 +1,12 @@
+---
+source: crates/loupe-symbols/tests/golden.rs
+expression: "render_outline(& symbols, & OutlineOptions :: default())"
+---
+#define MAX_ITEMS 10  L3-4
+#define SQUARE(x) ((x) * (x))  L4-5
+typedef unsigned int uint;  L6
+struct point  L8-11
+enum color  L13
+static int helper(int a)  L15-17
+int add(int a, int b)  L19-21
+char *name_of(int id)  L23-25

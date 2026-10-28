@@ -1,0 +1,27 @@
+---
+source: crates/loupe-symbols/tests/golden.rs
+expression: "render_outline(& symbols, & OutlineOptions :: default())"
+---
+pub struct Server  L9-11  // A server that does things.
+pub const MAX_CONNECTIONS: usize = 1024;  L13
+static COUNTER: u32 = 0;  L14
+pub type Handler = Box<dyn Fn(&str) -> String>;  L16
+pub trait Service  L19-25  // Behavior shared by services.
+  fn start(&self) -> Result<(), String>;  L21  // Start the service.
+  fn name(&self) -> &str  L22-24
+impl Server  L27-40
+  pub fn new(port: u16) -> Self  L29-32  // Create a server.
+  fn private_helper(&self)  L34
+  pub async fn run(&self) -> std::io::Result<()>  L36-39
+    fn nested_fn()  L37
+impl Service for Server  L42-46
+  fn start(&self) -> Result<(), String>  L43-45
+impl<T: fmt::Debug> fmt::Display for Wrapper<T>  L48-52
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result  L49-51
+pub enum Mode  L54-57
+pub mod inner  L59-65
+  pub fn deep()  L60
+  mod hidden  L62-64
+    pub struct Secret;  L63
+macro_rules! make_thing  L67-69
+pub fn generic<T>(items: Vec<T>) -> usize where T: Clone,  L71-76

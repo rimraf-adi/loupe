@@ -1,0 +1,20 @@
+---
+source: crates/loupe-symbols/tests/golden.rs
+expression: detailed(& symbols)
+---
+interface public    Config             parent=-          L2-5  | interface Config  /// Configuration for the app.
+method    public    run                parent=Config     L4-4  | run(): void
+type      public    Handler            parent=-          L7-7  | type Handler = (req: string) => string;
+enum      public    Level              parent=-          L9-12  | enum Level
+function  private   internalHelper     parent=-          L15-17  | function internalHelper(x: number): number  /// Not exported
+function  public    add                parent=-          L20-22  | function add(a: number, b: number): number  /// Adds numbers.
+function  public    double             parent=-          L24-24  | const double = (n: number): number =>
+function  private   hidden             parent=-          L26-28  | const hidden = (s: string) =>
+class     public    Server             parent=-          L30-45  | class Server
+method    public    constructor        parent=Server     L33-33  | constructor(private readonly config: Config)
+method    public    start              parent=Server     L36-36  | public start(): void  /// Start listening.
+method    protected stop               parent=Server     L38-38  | protected stop(): void
+method    private   reset              parent=Server     L40-40  | private reset(): void
+method    public    create             parent=Server     L42-44  | static create(): Server
+class     public    Base               parent=-          L47-49  | abstract class Base
+method    public    name               parent=Base       L48-48  | abstract name(): string

@@ -1,0 +1,30 @@
+[package]
+name = "loupe-cli"
+description = "Client and debug/inspect commands"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "loupe"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+loupe-api.workspace = true
+loupe-daemon.workspace = true
+loupe-proto.workspace = true
+loupe-mcp.workspace = true
+loupe-core.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+serde_json.workspace = true

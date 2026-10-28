@@ -1,0 +1,23 @@
+[package]
+name = "loupe-map"
+description = "Merkle tree, summaries, repo map and outline rendering"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+loupe-core.workspace = true
+loupe-symbols.workspace = true
+loupe-graph.workspace = true
+blake3.workspace = true
+regex.workspace = true
+serde.workspace = true
+redb = "4.1.0"
+
+[dev-dependencies]
+tempfile.workspace = true

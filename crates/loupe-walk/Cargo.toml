@@ -1,0 +1,20 @@
+[package]
+name = "loupe-walk"
+description = "File discovery, ignore rules, language detection, hashing, snapshot diff"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ignore.workspace = true
+rayon.workspace = true
+tracing.workspace = true
+loupe-core.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,0 +1,11 @@
+---
+source: crates/loupe-symbols/tests/golden.rs
+expression: detailed(& symbols)
+---
+function  unknown   plain              parent=-          L2-4  | function plain(a, b)  /// Utility functions.
+function  unknown   arrow              parent=-          L6-6  | const arrow = (x) =>
+function  unknown   viaExpression      parent=-          L8-10  | const viaExpression = function (y)
+class     unknown   Widget             parent=-          L12-24  | class Widget
+method    public    constructor        parent=Widget     L13-15  | constructor(name)
+method    public    render             parent=Widget     L17-19  | render()
+method    public    build              parent=Widget     L21-23  | static build()

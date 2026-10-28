@@ -1,0 +1,27 @@
+[package]
+name = "loupe-api"
+description = "Public facade the Rust harness depends on"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+loupe-core.workspace = true
+loupe-walk.workspace = true
+loupe-store.workspace = true
+loupe-text.workspace = true
+loupe-symbols.workspace = true
+loupe-graph.workspace = true
+loupe-map.workspace = true
+loupe-embed.workspace = true
+loupe-query.workspace = true
+rayon.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

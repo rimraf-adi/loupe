@@ -1,0 +1,9 @@
+---
+source: crates/loupe-symbols/tests/golden.rs
+expression: detailed(&symbols)
+---
+class     unknown   Greeter            parent=-          L4-4  | class Greeter(val name: String)
+function  unknown   greet              parent=-          L5-5  | fun greet(): String = "hi $name"
+class     unknown   Registry           parent=-          L8-8  | object Registry
+function  unknown   topLevel           parent=-          L10-10  | fun topLevel(x: Int): Int = x + 1
+constant  unknown   LIMIT              parent=-          L12-12  | const val LIMIT = 10
