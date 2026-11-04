@@ -37,8 +37,30 @@ loupe query 'where do we retry failed requests'
 loupe status                         # snapshot, segments, checksum verification
 ```
 
-The index lives in `<root>/.loupe` unless `--index-dir` is given. Add `.loupe/` to your
-`.gitignore`.
+The index lives in `<root>/.loupe` unless `--index-dir` is given. It ignores itself (it writes a
+`.gitignore` and a `CACHEDIR.TAG` into that directory), so you do not need to edit yours.
+
+### Large trees and build output
+
+Repos with gigabytes of build output are the normal case, so resource use is bounded by design:
+
+- **Not entered at all:** `node_modules`, Cargo `target/` (next to a `Cargo.toml`/`pom.xml`/
+  `build.sbt`), any directory carrying a `CACHEDIR.TAG` (Cargo, CMake, pip, and others write one),
+  virtualenvs (`pyvenv.cfg`), `__pycache__`, `.gradle`, `.next`, `DerivedData`, `Pods`, `cmake-build-*`,
+  and similar. `.gitignore`, `.ignore` and `.loupeignore` are honored too, with or without a `.git`.
+- **Never opened:** files with binary or generated extensions (`.o .rlib .so .class .jar .png .zip
+  .wasm .map ...`); other binaries are rejected after sniffing 8 KiB.
+- **Hard budgets**, for whatever is left: `--max-files-indexed` (default 500000), `--max-total-mb`
+  (default 2048) and `--max-file-kb` (default 1024). Over budget, hand-written source in known
+  languages is kept first, then source under `out/`, `dist/`, `build/`-style directories, then other
+  text; smaller files before larger; ties by path. The choice is deterministic, and the CLI says what
+  was dropped and which directories lost the most (`dropped 14946 files under out/`).
+- Ambiguous names (`build`, `dist`, `out`, `bin`, `vendor`) are *not* excluded automatically, because
+  they are sometimes source. If they are build output and not gitignored, put them in `.loupeignore`.
+- `--no-default-excludes` turns off the built-in directory and extension rules.
+
+Memory is bounded per segment (`--max-segment-mb`). Measured on a 94k-file tree with 21 GB of
+logical build output, see `docs/progress.md`: peak RSS 163 MB, index 109 MiB.
 
 ### Keeping it fresh
 
@@ -48,6 +70,12 @@ loupe daemon status
 loupe daemon metrics   # per-request counts and p50/p95/p99 latency, segments, index size
 loupe daemon stop
 ```
+
+The daemon ignores events under excluded, ignored and binary paths, so a build writing tens of
+thousands of files wakes nothing, and it paces background re-scans to at most one per second
+(`DaemonOptions::min_update_interval`). Edits to real source are searchable within about 50 ms either
+way. SIGINT/SIGTERM shut it down cleanly. If the OS watch limit prevents watching, it logs the
+failure and falls back to periodic scans instead of exiting.
 
 Without the daemon, run `loupe index` yourself. Reads never block on a writer and never see a
 half-written index. A crash at any step leaves the previous snapshot intact (verified by killing
@@ -103,6 +131,13 @@ Full design and the evidence behind each claim: [docs/v1.md](docs/v1.md) and
   summarizer.
 - No Windows runtime yet; no SCIP/LSIF ingest.
 - Not yet run for hours or at multi-million-file scale; see the soak notes in `docs/progress.md`.
+- The embedding cache file (`.loupe/cache/embeddings.redb`) is pruned to the live index on `gc` and
+  on compaction, but the file itself is not shrunk; freed pages are reused.
+- On Linux the watcher uses one inotify watch per directory, including excluded ones. Very large
+  trees may need `fs.inotify.max_user_watches` raised; if watching fails the daemon degrades to
+  periodic scans (it never exits).
+- Whether an agent with Loupe solves tasks better than one with plain `rg` is not yet measured end to
+  end; see "Open questions" in `docs/progress.md`.
 
 ## License
 

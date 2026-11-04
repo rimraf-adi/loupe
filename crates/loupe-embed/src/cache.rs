@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use redb::{Database, ReadableDatabase, TableDefinition};
+use redb::{Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition};
 
 /// Cap on redb's in-memory page cache (its default is 1 GiB).
 const CACHE_BYTES: usize = 32 * 1024 * 1024;
@@ -140,6 +140,59 @@ impl VectorCache {
         }
     }
 
+    /// Delete every entry whose hash is not in `live`; returns how many were removed. Without
+    /// this the cache only grows: every chunk text ever embedded would stay forever.
+    pub fn retain(&self, live: &std::collections::HashSet<ChunkHash>) -> usize {
+        match &self.backend {
+            Backend::Memory(m) => {
+                let mut m = m.lock().unwrap();
+                let before = m.len();
+                m.retain(|h, _| live.contains(h));
+                before - m.len()
+            }
+            Backend::Disk(db) => (|| -> Result<usize, redb::Error> {
+                let tx = db.begin_write()?;
+                let mut removed = 0;
+                {
+                    let mut table = tx.open_table(VECTORS)?;
+                    let mut stale: Vec<ChunkHash> = Vec::new();
+                    for entry in table.iter()? {
+                        let (key, _) = entry?;
+                        match <ChunkHash>::try_from(key.value()) {
+                            Ok(h) if live.contains(&h) => {}
+                            Ok(h) => stale.push(h),
+                            Err(_) => {} // not one of ours; leave it
+                        }
+                    }
+                    for h in &stale {
+                        if table.remove(h.as_slice())?.is_some() {
+                            removed += 1;
+                        }
+                    }
+                }
+                tx.commit()?;
+                Ok(removed)
+            })()
+            .unwrap_or(0),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match &self.backend {
+            Backend::Memory(m) => m.lock().unwrap().len(),
+            Backend::Disk(db) => (|| -> Option<usize> {
+                let tx = db.begin_read().ok()?;
+                let table = tx.open_table(VECTORS).ok()?;
+                table.len().ok().map(|n| n as usize)
+            })()
+            .unwrap_or(0),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn hits(&self) -> u64 {
         self.hits.load(Ordering::Relaxed)
     }
@@ -193,6 +246,26 @@ mod tests {
         drop(disk);
         let again = VectorCache::open(&path);
         assert_eq!(again.get(&[2u8; 16], 8), Some(qv(50)));
+    }
+
+    #[test]
+    fn retain_drops_only_entries_outside_the_live_set() {
+        let dir = tempfile::tempdir().unwrap();
+        for cache in [
+            VectorCache::in_memory(),
+            VectorCache::open(&dir.path().join("c.redb")),
+        ] {
+            let entries: Vec<(ChunkHash, QuantVec)> =
+                (0..10u8).map(|i| ([i; 16], qv(i as i8))).collect();
+            cache.put_many(&entries);
+            assert_eq!(cache.len(), 10);
+            let live: std::collections::HashSet<ChunkHash> = (0..4u8).map(|i| [i; 16]).collect();
+            assert_eq!(cache.retain(&live), 6);
+            assert_eq!(cache.len(), 4);
+            assert!(cache.get(&[3; 16], 8).is_some());
+            assert!(cache.get(&[9; 16], 8).is_none());
+            assert_eq!(cache.retain(&live), 0);
+        }
     }
 
     #[test]

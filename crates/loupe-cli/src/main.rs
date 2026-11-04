@@ -29,6 +29,19 @@ struct RepoArgs {
     /// Source megabytes indexed per segment; bounds peak memory while indexing (default 64).
     #[arg(long)]
     max_segment_mb: Option<u64>,
+    /// Largest single file indexed, in kilobytes (default 1024).
+    #[arg(long)]
+    max_file_kb: Option<u64>,
+    /// Hard cap on total indexed source, in megabytes (default 2048). Over it, source files are
+    /// kept first and the rest are skipped and reported.
+    #[arg(long)]
+    max_total_mb: Option<u64>,
+    /// Hard cap on the number of indexed files (default 500000).
+    #[arg(long)]
+    max_files_indexed: Option<usize>,
+    /// Do not skip build/cache/dependency directories and binary extensions automatically.
+    #[arg(long)]
+    no_default_excludes: bool,
 }
 
 impl RepoArgs {
@@ -41,6 +54,16 @@ impl RepoArgs {
         if let Some(mb) = self.max_segment_mb {
             config.max_segment_bytes = mb.max(1) * 1024 * 1024;
         }
+        if let Some(kb) = self.max_file_kb {
+            config.max_file_bytes = kb.max(1) * 1024;
+        }
+        if let Some(mb) = self.max_total_mb {
+            config.max_total_bytes = mb.max(1) * 1024 * 1024;
+        }
+        if let Some(n) = self.max_files_indexed {
+            config.max_files = n.max(1);
+        }
+        config.default_excludes = !self.no_default_excludes;
         Ok(config)
     }
 }

@@ -459,6 +459,27 @@ impl Index {
         self.store.gc()
     }
 
+    /// Drop cached embedding vectors that no live segment references (chunks of edited or deleted
+    /// code). Returns how many were removed. Safe to call at any time on a writer: the writer lock
+    /// means no build is in flight. If any live segment cannot be read nothing is pruned.
+    pub fn prune_embedding_cache(&self) -> Result<usize> {
+        let mut live = HashSet::new();
+        for id in self.store.segment_ids() {
+            let seg = self.store.open_segment(id)?;
+            if let Some(idx) = EmbedIndex::from_segment(&seg)? {
+                for i in 0..idx.len() {
+                    live.insert(idx.chunk(i)?.hash);
+                }
+            }
+        }
+        Ok(self.vectors.retain(&live))
+    }
+
+    /// Number of vectors in the embedding cache.
+    pub fn embedding_cache_len(&self) -> usize {
+        self.vectors.len()
+    }
+
     /// How long retired segments keep their files (default 30 s).
     pub fn set_retire_grace(&mut self, grace: std::time::Duration) {
         self.store.set_retire_grace(grace);

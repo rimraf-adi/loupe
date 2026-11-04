@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -21,7 +22,7 @@ use loupe_proto::{
     validate_rel_path, write_frame,
 };
 use loupe_symbols::SymbolSearcher;
-use loupe_walk::{is_indexable_content, is_secret_path};
+use loupe_walk::{has_skipped_extension, is_excluded_dir, is_indexable_content, is_secret_path};
 use notify_debouncer_full::notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{DebounceEventResult, Debouncer, RecommendedCache, new_debouncer};
 
@@ -35,6 +36,10 @@ pub struct DaemonOptions {
     pub debounce: Duration,
     /// Watch the working tree. Without it only requests and timers change the index.
     pub watch: bool,
+    /// Minimum time between background re-scans. A burst of watcher events (a build writing
+    /// thousands of files) is coalesced into at most one scan per interval. Edits are still
+    /// visible within the debounce window through the overlay; this only paces the full walk.
+    pub min_update_interval: Duration,
 }
 
 impl Default for DaemonOptions {
@@ -44,6 +49,7 @@ impl Default for DaemonOptions {
             rehash_every: Duration::from_secs(30 * 60),
             debounce: Duration::from_millis(30),
             watch: true,
+            min_update_interval: Duration::from_secs(1),
         }
     }
 }
@@ -69,6 +75,9 @@ struct Shared {
     summaries: SummaryCache,
     overlay: RwLock<Overlay>,
     ignore: RwLock<Gitignore>,
+    /// Cache of "is this directory excluded?" answers for watcher events, so a build flooding an
+    /// excluded tree costs a hash lookup per event instead of filesystem calls. Reset per update.
+    excluded_dirs: Mutex<HashMap<PathBuf, bool>>,
     updates: AtomicU64,
     compactions: AtomicU64,
     started: Instant,
@@ -112,6 +121,7 @@ pub fn start(config: Config, opts: DaemonOptions) -> Result<DaemonHandle> {
     let (jobs, rx) = mpsc::channel();
     let shared = Arc::new(Shared {
         ignore: RwLock::new(build_ignore(&config.root)),
+        excluded_dirs: Mutex::new(HashMap::new()),
         config,
         index: Mutex::new(index),
         searcher: ArcSwap::from_pointee(searcher),
@@ -129,8 +139,16 @@ pub fn start(config: Config, opts: DaemonOptions) -> Result<DaemonHandle> {
         socket,
     });
 
+    // A watcher that cannot start (e.g. the OS watch limit on a huge tree) must not take the
+    // daemon down: the periodic reconcile scan still keeps the index current, just less promptly.
     let debouncer = if opts.watch {
-        Some(start_watcher(&shared, opts.debounce)?)
+        match start_watcher(&shared, opts.debounce) {
+            Ok(d) => Some(d),
+            Err(e) => {
+                tracing::error!(%e, "file watcher unavailable; falling back to periodic scans");
+                None
+            }
+        }
     } else {
         None
     };
@@ -170,6 +188,12 @@ impl DaemonHandle {
         self.shared.shutdown();
     }
 
+    /// A cloneable handle that can stop the daemon from another thread (e.g. a signal handler)
+    /// while this one is blocked in [`DaemonHandle::wait`].
+    pub fn stopper(&self) -> Stopper {
+        Stopper(self.shared.clone())
+    }
+
     /// Block until the daemon stops (a client sent `Shutdown`, or [`DaemonHandle::shutdown`]).
     pub fn wait(mut self) {
         self.join();
@@ -182,6 +206,22 @@ impl DaemonHandle {
         if let Some(h) = self.worker.take() {
             let _ = h.join();
         }
+    }
+}
+
+/// Stops a running daemon; see [`DaemonHandle::stopper`].
+#[derive(Clone)]
+pub struct Stopper(Arc<Shared>);
+
+impl std::fmt::Debug for Stopper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Stopper")
+    }
+}
+
+impl Stopper {
+    pub fn stop(&self) {
+        self.0.shutdown();
     }
 }
 
@@ -216,6 +256,9 @@ impl Shared {
                     if let Err(e) = index.gc() {
                         tracing::warn!(%e, "gc after auto-compaction failed");
                     }
+                    if let Err(e) = index.prune_embedding_cache() {
+                        tracing::warn!(%e, "embedding cache prune failed");
+                    }
                 }
                 Ok(_) => {}
                 // Compaction is an optimisation; a failure must not fail the update.
@@ -228,6 +271,7 @@ impl Shared {
         self.updates.fetch_add(1, Ordering::Relaxed);
         self.overlay.write().unwrap().drop_through(seq);
         *self.ignore.write().unwrap() = build_ignore(&self.config.root);
+        self.excluded_dirs.lock().unwrap().clear();
         Ok(UpdateSummary {
             snapshot_id: report.snapshot_id,
             files: report.files,
@@ -251,6 +295,11 @@ impl Shared {
         let mut index = self.index.lock().unwrap();
         let report = index.compact(&CompactPolicy::default())?;
         let gc = index.gc()?;
+        match index.prune_embedding_cache() {
+            Ok(n) if n > 0 => tracing::info!(pruned = n, "pruned stale embedding vectors"),
+            Ok(_) => {}
+            Err(e) => tracing::warn!(%e, "embedding cache prune failed"),
+        }
         self.publish(&index)?;
         self.compactions.fetch_add(1, Ordering::Relaxed);
         Ok(CompactSummary {
@@ -290,18 +339,46 @@ impl Shared {
         let Some(rel_str) = rel_to_string(rel) else {
             return false;
         };
+        // Ignore rules changed: reload them now (the paced re-scan may be a second away), so the
+        // very next event is judged by the new rules.
+        if matches!(
+            rel_str.rsplit('/').next(),
+            Some(".gitignore" | ".ignore" | loupe_core::config::IGNORE_FILE)
+        ) {
+            *self.ignore.write().unwrap() = build_ignore(&self.config.root);
+            self.excluded_dirs.lock().unwrap().clear();
+            return true;
+        }
+        // Build output and binaries never reach the index, so they must not wake the worker
+        // either: a compile writing thousands of files would otherwise trigger a re-scan per burst.
+        if self.config.default_excludes
+            && (has_skipped_extension(&rel_str) || self.in_excluded_dir(rel))
+        {
+            return false;
+        }
 
-        let admitted = match fs::metadata(abs) {
-            Ok(md) if md.is_dir() => return true, // new files inside arrive as their own events
-            Ok(md) if md.is_file() => {
+        let metadata = fs::metadata(abs).ok();
+        let is_dir = metadata.as_ref().is_some_and(|m| m.is_dir());
+        // Ignored paths are not in the index (unless a .gitignore just changed, which the
+        // `.gitignore` file's own event handles): nothing to mirror, nothing to re-scan.
+        if self
+            .ignore
+            .read()
+            .unwrap()
+            .matched_path_or_any_parents(rel, is_dir)
+            .is_ignore()
+        {
+            return false;
+        }
+        let admitted = match metadata {
+            // New files inside arrive as their own events; the directory itself matters only if
+            // it could have been moved in whole, and never if it is build output.
+            Some(md) if md.is_dir() => {
+                return !(self.config.default_excludes && self.in_excluded_dir(&rel.join("_")));
+            }
+            Some(md) if md.is_file() => {
                 md.len() <= self.config.max_file_bytes
                     && (self.config.index_secrets || !is_secret_path(&rel_str))
-                    && !self
-                        .ignore
-                        .read()
-                        .unwrap()
-                        .matched_path_or_any_parents(rel, false)
-                        .is_ignore()
             }
             _ => false,
         };
@@ -324,6 +401,28 @@ impl Shared {
             }
         }
         true
+    }
+
+    /// True if a directory above `rel` is a build/cache/dependency directory (cached per update).
+    fn in_excluded_dir(&self, rel: &Path) -> bool {
+        let Some(parent) = rel.parent() else {
+            return false;
+        };
+        let mut cache = self.excluded_dirs.lock().unwrap();
+        if cache.len() > 100_000 {
+            cache.clear(); // bound memory under a pathological event stream
+        }
+        let mut cur = self.config.root.clone();
+        for comp in parent.components() {
+            cur.push(comp);
+            let excluded = *cache
+                .entry(cur.clone())
+                .or_insert_with(|| is_excluded_dir(&cur));
+            if excluded {
+                return true;
+            }
+        }
+        false
     }
 
     /// The graph for the snapshot queries currently see, building it if this snapshot has none.
@@ -575,6 +674,16 @@ fn worker_loop(shared: &Shared, rx: &Receiver<Job>, opts: &DaemonOptions) {
         match rx.recv_timeout(wait) {
             Ok(Job::Stop) | Err(RecvTimeoutError::Disconnected) => return,
             Ok(Job::Update) => {
+                // Pace event-driven scans: wait out the rest of the minimum interval, folding
+                // any further requests into this one.
+                let deadline = last_update + opts.min_update_interval;
+                while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+                    match rx.recv_timeout(left) {
+                        Ok(Job::Stop) | Err(RecvTimeoutError::Disconnected) => return,
+                        Ok(Job::Update) => {}
+                        Err(RecvTimeoutError::Timeout) => break,
+                    }
+                }
                 // Coalesce a burst of requests into one scan.
                 while let Ok(job) = rx.try_recv() {
                     if matches!(job, Job::Stop) {

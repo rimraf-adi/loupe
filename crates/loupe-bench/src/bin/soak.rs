@@ -149,6 +149,7 @@ fn main() -> anyhow::Result<()> {
             rehash_every: Duration::from_secs(20),
             debounce: Duration::from_millis(100),
             watch: true,
+            min_update_interval: Duration::from_millis(200),
         },
     )?;
     let mut client = Client::connect(&config.index_dir)?;

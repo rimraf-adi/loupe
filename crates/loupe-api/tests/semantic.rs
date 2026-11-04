@@ -265,3 +265,34 @@ fn empty_index_and_empty_query_are_fine() {
         r.hits
     );
 }
+
+#[test]
+fn pruning_drops_vectors_of_edited_code_and_keeps_live_ones() {
+    let p = Project::new();
+    let mut idx = p.index();
+    let before = idx.embedding_cache_len();
+    assert!(before > 0);
+    // Nothing is stale yet.
+    assert_eq!(idx.prune_embedding_cache().unwrap(), 0);
+
+    // Rewrite one file; its old chunks are no longer referenced by any live segment once the
+    // old segment is compacted away.
+    p.write(
+        "render/mesh.rs",
+        "pub fn render_quad_strip(points: &[Point]) {\n    draw_strip(points)\n}\n",
+    );
+    idx.update(true).unwrap();
+    idx.compact(&loupe_api::CompactPolicy {
+        min_dead_ratio: 0.0,
+        ..loupe_api::CompactPolicy::default()
+    })
+    .unwrap();
+    let pruned = idx.prune_embedding_cache().unwrap();
+    assert!(pruned > 0, "old mesh chunks should be pruned");
+    assert!(idx.embedding_cache_len() < before + 3);
+    // Semantic search still works against the live index.
+    let hits = idx
+        .search_semantic("network connection to a host", &opts(3))
+        .unwrap();
+    assert!(!hits.hits.is_empty());
+}

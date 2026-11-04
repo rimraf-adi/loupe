@@ -37,6 +37,24 @@ pub fn index(config: &Config, force_rehash: bool) -> anyhow::Result<()> {
         walk.skipped_symlink,
         walk.errors
     );
+    println!(
+        "  excluded: {} build/cache dirs not entered, {} binary-extension files, {} over budget",
+        walk.skipped_dirs, walk.skipped_extension, walk.skipped_budget
+    );
+    if walk.truncated {
+        eprintln!(
+            "warning: the tree exceeds the index budget (--max-files-indexed {}, --max-total-mb {}); \
+             the index covers source files first and is partial. Put build output in .loupeignore \
+             or raise the limits.",
+            config.max_files,
+            config.max_total_bytes / (1024 * 1024)
+        );
+        for (dir, n) in &walk.dropped_top_dirs {
+            eprintln!(
+                "  dropped {n} files under {dir}/  (add `{dir}/` to .loupeignore to exclude it)"
+            );
+        }
+    }
     match report.new_segment {
         Some((id, n)) => println!("  new segment {:016x}: {n} blobs indexed", id.0),
         None if report.unchanged => println!("  up to date, nothing written"),
@@ -64,6 +82,7 @@ pub fn status(config: &Config) -> anyhow::Result<()> {
         snapshot.len()
     );
     println!("segments: {}", store.segment_ids().len());
+    println!("size:     {}", human_bytes(dir_size(&config.index_dir)));
     let bad = store.verify();
     if bad.is_empty() {
         println!("verify:   ok");
@@ -247,6 +266,23 @@ pub fn daemon_run(config: &Config, opts: loupe_daemon::DaemonOptions) -> anyhow:
         handle.socket().display(),
         std::process::id()
     );
+    // SIGINT/SIGTERM stop the daemon cleanly: the socket file is removed and the writer lock is
+    // released through the normal shutdown path instead of being left for the next start to find.
+    let stopper = handle.stopper();
+    let mut signals = signal_hook::iterator::Signals::new([
+        signal_hook::consts::SIGINT,
+        signal_hook::consts::SIGTERM,
+    ])
+    .context("installing signal handlers")?;
+    std::thread::Builder::new()
+        .name("loupe-signals".into())
+        .spawn(move || {
+            if let Some(sig) = signals.forever().next() {
+                tracing::info!(sig, "signal received; shutting down");
+                stopper.stop();
+            }
+        })
+        .context("starting signal thread")?;
     handle.wait();
     println!("daemon stopped");
     Ok(())
@@ -319,6 +355,11 @@ pub fn gc(config: &Config) -> anyhow::Result<()> {
     println!(
         "removed {} segments, {} temp files, {} old snapshots; {} segments retained by grace",
         g.segments_removed, g.tmp_removed, g.snapshots_removed, g.segments_retained
+    );
+    let pruned = index.prune_embedding_cache()?;
+    println!(
+        "pruned {pruned} stale embedding vectors ({} kept)",
+        index.embedding_cache_len()
     );
     Ok(())
 }
@@ -662,4 +703,33 @@ pub fn query(
         stages.join(", ")
     );
     Ok(())
+}
+
+/// Total size of all files under `dir`, ignoring unreadable entries.
+fn dir_size(dir: &std::path::Path) -> u64 {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| match e.metadata() {
+            Ok(m) if m.is_dir() => dir_size(&e.path()),
+            Ok(m) => m.len(),
+            Err(_) => 0,
+        })
+        .sum()
+}
+
+fn human_bytes(n: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KiB", "MiB", "GiB"];
+    let mut v = n as f64;
+    let mut unit = 0;
+    while v >= 1024.0 && unit < UNITS.len() - 1 {
+        v /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{n} B")
+    } else {
+        format!("{v:.1} {}", UNITS[unit])
+    }
 }

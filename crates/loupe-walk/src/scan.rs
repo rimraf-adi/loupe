@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ignore::WalkBuilder;
@@ -9,6 +11,7 @@ use loupe_core::{BlobId, Config, Error, FileMeta, Result, Snapshot};
 use rayon::prelude::*;
 
 use crate::diff::{Diff, diff};
+use crate::exclude::{has_skipped_extension, is_excluded_dir};
 use crate::lang::detect_language;
 use crate::secrets::is_secret_path;
 
@@ -39,6 +42,16 @@ pub struct WalkStats {
     pub skipped_minified: usize,
     pub skipped_secret: usize,
     pub skipped_symlink: usize,
+    /// Files with binary/generated extensions (`.o`, `.rlib`, `.map`, ...), never opened.
+    pub skipped_extension: usize,
+    /// Files dropped because the tree exceeded `Config::max_files` or `max_total_bytes`.
+    pub skipped_budget: usize,
+    /// Directories not descended into (build output, caches, dependencies).
+    pub skipped_dirs: usize,
+    /// The walk stopped early or the budget dropped files: the index is a subset of the tree.
+    pub truncated: bool,
+    /// Top-level directories that lost the most files to the budget, most first (at most 3).
+    pub dropped_top_dirs: Vec<(String, usize)>,
     /// Unreadable entries, non-UTF-8 paths, and files that vanished mid-scan.
     pub errors: usize,
 }
@@ -52,7 +65,6 @@ pub struct Scan {
 }
 
 struct Candidate {
-    abs: PathBuf,
     rel: String,
     size: u64,
     mtime_ns: i64,
@@ -83,6 +95,10 @@ pub fn scan(config: &Config, prev: Option<&Snapshot>, opts: &WalkOptions) -> Res
     let mut stats = WalkStats::default();
 
     let index_dir = config.index_dir.clone();
+    let skipped_dirs = Arc::new(AtomicUsize::new(0));
+    let skipped_dirs_in_filter = Arc::clone(&skipped_dirs);
+    let default_excludes = config.default_excludes;
+    let walk_root = root.clone();
     let mut builder = WalkBuilder::new(root);
     builder
         .standard_filters(false)
@@ -95,10 +111,33 @@ pub fn scan(config: &Config, prev: Option<&Snapshot>, opts: &WalkOptions) -> Res
         .require_git(false)
         .follow_links(false)
         .add_custom_ignore_filename(IGNORE_FILE)
-        .filter_entry(move |e| e.file_name() != ".git" && e.path() != index_dir);
+        // Deterministic traversal: if the walk limit cuts the walk short, it cuts at the same
+        // place on every run instead of wherever `readdir` happened to start.
+        .sort_by_file_path(|a, b| a.cmp(b))
+        .filter_entry(move |e| {
+            if e.file_name() == ".git" || e.path() == index_dir {
+                return false;
+            }
+            if default_excludes
+                && e.path() != walk_root
+                && e.file_type().is_some_and(|t| t.is_dir())
+                && is_excluded_dir(e.path())
+            {
+                skipped_dirs_in_filter.fetch_add(1, Ordering::Relaxed);
+                return false;
+            }
+            true
+        });
 
+    // The walk itself is bounded: a runaway tree must not exhaust memory before the budget runs.
+    let walk_limit = config.max_files.saturating_mul(4).max(1024);
     let mut candidates = Vec::new();
     for result in builder.build() {
+        if stats.seen >= walk_limit {
+            tracing::warn!(walk_limit, "walk limit reached; the index will be partial");
+            stats.truncated = true;
+            break;
+        }
         let entry = match result {
             Ok(e) => e,
             Err(err) => {
@@ -123,6 +162,10 @@ pub fn scan(config: &Config, prev: Option<&Snapshot>, opts: &WalkOptions) -> Res
             continue;
         };
         stats.seen += 1;
+        if config.default_excludes && has_skipped_extension(&rel) {
+            stats.skipped_extension += 1;
+            continue;
+        }
         if !config.index_secrets && is_secret_path(&rel) {
             stats.skipped_secret += 1;
             continue;
@@ -140,17 +183,32 @@ pub fn scan(config: &Config, prev: Option<&Snapshot>, opts: &WalkOptions) -> Res
             continue;
         }
         candidates.push(Candidate {
-            abs: entry.into_path(),
             rel,
             size: md.len(),
             mtime_ns: md.modified().map(system_time_ns).unwrap_or(0),
         });
     }
 
+    stats.skipped_dirs = skipped_dirs.load(Ordering::Relaxed);
+    let (dropped, top) = apply_budget(&mut candidates, config);
+    if dropped > 0 {
+        tracing::warn!(
+            dropped,
+            max_files = config.max_files,
+            max_total_bytes = config.max_total_bytes,
+            ?top,
+            "tree exceeds the index budget; keeping source files first. Add build output to \
+             .loupeignore or raise the limits"
+        );
+        stats.skipped_budget = dropped;
+        stats.truncated = true;
+        stats.dropped_top_dirs = top;
+    }
+
     let prev_taken = prev.map(|p| p.taken_ns);
     let outcomes: Vec<Outcome> = candidates
         .par_iter()
-        .map(|c| process(c, prev, prev_taken, opts))
+        .map(|c| process(root, c, prev, prev_taken, opts))
         .collect();
 
     let mut snapshot = Snapshot {
@@ -181,7 +239,70 @@ pub fn scan(config: &Config, prev: Option<&Snapshot>, opts: &WalkOptions) -> Res
     })
 }
 
+/// Directory names that usually hold generated output rather than hand-written source.
+const GENERATED_DIR_NAMES: &[&str] = &[
+    "build",
+    "dist",
+    "out",
+    "obj",
+    "bin",
+    "generated",
+    "gen",
+    "_build",
+    ".output",
+    "coverage",
+    "storybook-static",
+    "site-packages",
+];
+
+/// Lower is kept first: 0 = source in a known language outside generated-looking directories,
+/// 1 = known language under a directory like `out/` or `dist/`, 2 = everything else.
+fn priority(rel: &str) -> u8 {
+    if detect_language(rel, &[]).is_none() {
+        return 2;
+    }
+    let mut parts = rel.split('/');
+    parts.next_back(); // the file name
+    if parts.any(|d| GENERATED_DIR_NAMES.contains(&d)) {
+        1
+    } else {
+        0
+    }
+}
+
+/// Keep within `max_files` / `max_total_bytes`. Selection is deterministic (so the kept set does
+/// not flap between runs): by [`priority`], then smaller files before larger ones, then path.
+/// Returns how many candidates were dropped and the top-level directories that lost the most.
+fn apply_budget(candidates: &mut Vec<Candidate>, config: &Config) -> (usize, Vec<(String, usize)>) {
+    let total: u64 = candidates.iter().map(|c| c.size).sum();
+    if candidates.len() <= config.max_files && total <= config.max_total_bytes {
+        return (0, Vec::new());
+    }
+    let before = candidates.len();
+    candidates.sort_by_cached_key(|c| (priority(&c.rel), c.size, c.rel.clone()));
+    let mut kept = 0usize;
+    let mut bytes = 0u64;
+    let mut lost: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    candidates.retain(|c| {
+        if kept < config.max_files && bytes.saturating_add(c.size) <= config.max_total_bytes {
+            kept += 1;
+            bytes += c.size;
+            true
+        } else {
+            let top = c.rel.split('/').next().unwrap_or("");
+            let top = if top == c.rel { "." } else { top };
+            *lost.entry(top.to_string()).or_default() += 1;
+            false
+        }
+    });
+    let mut top: Vec<(String, usize)> = lost.into_iter().collect();
+    top.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    top.truncate(3);
+    (before - candidates.len(), top)
+}
+
 fn process(
+    root: &Path,
     c: &Candidate,
     prev: Option<&Snapshot>,
     prev_taken: Option<i64>,
@@ -197,7 +318,7 @@ fn process(
         return Outcome::Reused(c.rel.clone(), old.clone());
     }
 
-    match read_and_classify(&c.abs) {
+    match read_and_classify(&root.join(&c.rel)) {
         Ok(Some(bytes)) => {
             let head = &bytes[..bytes.len().min(256)];
             let meta = FileMeta {
@@ -293,6 +414,7 @@ fn now_ns() -> i64 {
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::PathBuf;
     use std::time::Duration;
 
     struct Repo {
@@ -409,6 +531,88 @@ mod tests {
         let s = r.scan(None);
         assert_eq!(paths(&s), ["big.txt", "ok.txt"]);
         assert_eq!(s.stats.skipped_minified, 1);
+    }
+
+    #[test]
+    fn default_excludes_skip_build_trees_without_opening_them() {
+        let r = Repo::new();
+        r.write("Cargo.toml", "[package]");
+        r.write("src/lib.rs", "pub fn a() {}");
+        r.write("target/debug/deps/lib.d", "text that would be indexed");
+        r.write("target/debug/libx.rlib", "binaryish");
+        r.write("node_modules/pkg/index.js", "x");
+        r.write("web/bundle.js.map", "{}");
+        let s = r.scan(None);
+        assert_eq!(paths(&s), ["Cargo.toml", "src/lib.rs"]);
+        assert_eq!(s.stats.skipped_dirs, 2);
+        assert_eq!(s.stats.skipped_extension, 1);
+
+        let mut cfg = r.config();
+        cfg.default_excludes = false;
+        let s = scan(&cfg, None, &WalkOptions::default()).unwrap();
+        assert!(paths(&s).contains(&"target/debug/deps/lib.d"));
+        assert!(paths(&s).contains(&"node_modules/pkg/index.js"));
+    }
+
+    #[test]
+    fn budget_keeps_source_first_and_is_deterministic() {
+        let r = Repo::new();
+        r.write("src/a.rs", "fn a() {}");
+        r.write("src/b.rs", "fn b() {}");
+        r.write("gen/blob1.txt", vec![b'x'; 500]);
+        r.write("gen/blob2.txt", vec![b'y'; 400]);
+        let mut cfg = r.config();
+        cfg.max_files = 3;
+        let first = scan(&cfg, None, &WalkOptions::default()).unwrap();
+        // Both sources, then the smaller unknown-language file.
+        assert_eq!(paths(&first), ["gen/blob2.txt", "src/a.rs", "src/b.rs"]);
+        assert_eq!(first.stats.skipped_budget, 1);
+        assert!(first.stats.truncated);
+        let second = scan(&cfg, None, &WalkOptions::default()).unwrap();
+        assert_eq!(paths(&first), paths(&second));
+
+        cfg.max_files = 100;
+        cfg.max_total_bytes = 20; // only the two tiny sources fit
+        let s = scan(&cfg, None, &WalkOptions::default()).unwrap();
+        assert_eq!(paths(&s), ["src/a.rs", "src/b.rs"]);
+        assert_eq!(s.stats.skipped_budget, 2);
+    }
+
+    #[test]
+    fn budget_prefers_hand_written_source_over_generated_directories() {
+        let r = Repo::new();
+        for i in 0..5 {
+            r.write(
+                &format!("src/m{i}.rs"),
+                format!("fn f{i}() {{ /* padding padding */ }}"),
+            );
+        }
+        for i in 0..5 {
+            r.write(&format!("out/bundle{i}.js"), "var a=1;\n"); // smaller, but generated-looking
+        }
+        let mut cfg = r.config();
+        cfg.max_files = 5;
+        let s = scan(&cfg, None, &WalkOptions::default()).unwrap();
+        assert!(
+            paths(&s).iter().all(|p| p.starts_with("src/")),
+            "{:?}",
+            paths(&s)
+        );
+        assert_eq!(s.stats.dropped_top_dirs, [("out".to_string(), 5)]);
+    }
+
+    #[test]
+    fn walk_limit_stops_a_runaway_tree() {
+        let r = Repo::new();
+        for i in 0..2000 {
+            r.write(&format!("f{i}.txt"), "x");
+        }
+        let mut cfg = r.config();
+        cfg.max_files = 100; // walk limit is max(4 * 100, 1024) = 1024 entries
+        let s = scan(&cfg, None, &WalkOptions::default()).unwrap();
+        assert!(s.stats.truncated);
+        assert_eq!(s.snapshot.len(), 100);
+        assert!(s.stats.seen <= 1024);
     }
 
     #[test]

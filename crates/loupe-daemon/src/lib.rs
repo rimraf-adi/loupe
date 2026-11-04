@@ -17,7 +17,7 @@ mod metrics;
 mod server;
 
 pub use client::Client;
-pub use server::{DaemonHandle, DaemonOptions, start};
+pub use server::{DaemonHandle, DaemonOptions, Stopper, start};
 
 use std::path::{Path, PathBuf};
 

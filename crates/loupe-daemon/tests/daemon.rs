@@ -769,3 +769,86 @@ fn queries_stay_correct_while_files_churn_and_snapshots_swap() {
         on_disk
     );
 }
+
+fn updates(c: &mut Client) -> u64 {
+    let Response::Status(s) = c.call(&Request::Status).unwrap() else {
+        panic!()
+    };
+    s.updates
+}
+
+#[test]
+fn build_output_does_not_wake_the_scanner_but_source_edits_do() {
+    let env = Env::new();
+    env.write("Cargo.toml", "[package]\nname = \"x\"\n");
+    env.write(".gitignore", "dist/\n");
+    env.write(
+        "assets/keep.txt",
+        "an ordinary directory that exists before the build\n",
+    );
+    let _d = env.start(true);
+    let mut c = env.client();
+    let base = updates(&mut c);
+
+    // A "build" writing into excluded and ignored places, plus binary files.
+    for i in 0..200 {
+        env.write(&format!("target/debug/deps/crate{i}.d"), "dep info");
+        env.write(
+            &format!("node_modules/pkg{i}/index.js"),
+            "module.exports = 1;",
+        );
+        env.write(&format!("dist/out{i}.js"), "var x = 1;");
+        env.write(&format!("assets/lib{i}.rlib"), "not really binary");
+    }
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(
+        updates(&mut c),
+        base,
+        "events under excluded/ignored/binary paths must not trigger re-scans"
+    );
+    // ... and none of it is searchable.
+    assert!(search(&mut c, "module.exports").is_empty());
+    assert!(search(&mut c, "dep info").is_empty());
+
+    // A real source edit is visible immediately and does trigger a (paced) re-scan.
+    env.write("src/lib.rs", "pub fn brand_new_function() {}\n");
+    wait_for("edit visible", Duration::from_secs(5), || {
+        search(&mut c, "brand_new_function") == ["src/lib.rs"]
+    });
+    wait_for("paced update runs", Duration::from_secs(10), || {
+        updates(&mut c) > base
+    });
+}
+
+#[test]
+fn bursts_are_paced_to_one_scan_per_interval() {
+    let env = Env::new();
+    let _d = start(
+        env.config(),
+        DaemonOptions {
+            watch: true,
+            reconcile_every: Duration::from_secs(3600),
+            min_update_interval: Duration::from_millis(1500),
+            ..DaemonOptions::default()
+        },
+    )
+    .unwrap();
+    let mut c = env.client();
+    let base = updates(&mut c);
+    let begin = Instant::now();
+    for i in 0..60 {
+        env.write(&format!("src/f{i}.rs"), &format!("pub fn f{i}() {{}}\n"));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    wait_for("burst folded into scans", Duration::from_secs(15), || {
+        updates(&mut c) > base
+    });
+    std::thread::sleep(Duration::from_millis(2500));
+    let scans = updates(&mut c) - base;
+    let secs = begin.elapsed().as_secs_f64();
+    assert!(
+        scans as f64 <= secs / 1.4 + 1.0,
+        "{scans} scans in {secs:.1}s exceeds the 1.5s pacing"
+    );
+    assert!(scans < 6, "60 writes produced {scans} scans");
+}

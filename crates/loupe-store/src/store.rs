@@ -55,6 +55,7 @@ impl Store {
         let dir = dir.as_ref().to_path_buf();
         io(&dir, fs::create_dir_all(dir.join(SEGMENTS_DIR)))?;
         io(&dir, fs::create_dir_all(dir.join(SNAPSHOTS_DIR)))?;
+        mark_as_cache(&dir);
 
         let lock_path = dir.join(LOCK_FILE);
         let lock = io(
@@ -336,6 +337,24 @@ fn read_dir(dir: &Path) -> Result<Vec<fs::DirEntry>> {
         out.push(io(dir, entry)?);
     }
     Ok(out)
+}
+
+/// Tell git and other tools to leave the index directory alone: a `.gitignore` that ignores
+/// everything (so users need not edit theirs) and a `CACHEDIR.TAG` per the Cache Directory
+/// Tagging Specification (so backup tools and loupe's own walker skip it). Best effort.
+fn mark_as_cache(dir: &Path) {
+    for (name, body) in [
+        (".gitignore", "*\n"),
+        (
+            "CACHEDIR.TAG",
+            "Signature: 8a477f597d28d172789f06886806bc55\n# This directory is a loupe index cache.\n",
+        ),
+    ] {
+        let path = dir.join(name);
+        if !path.exists() {
+            let _ = fs::write(path, body);
+        }
+    }
 }
 
 #[cfg(test)]
