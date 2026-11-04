@@ -358,3 +358,9 @@ What I did not do or verify:
   repos) shows a modest recall gain, and the semantic arm uses a stand-in hashing embedder. The
   decisive experiment is an agent with and without `loupe mcp` on real tasks, comparing tokens used
   and success rate.
+
+## Scheduled work log
+
+- STEP1 VERDICT: NOT RUN. Harness is ready (`bench/agent/run.py`, `docs/agent-benchmark.md`) but the
+  bundled `claude` CLI is not logged in and no API key is set, so no real-model result exists.
+  Later steps that gate on "WORSE" should treat this as unknown, not as a pass.

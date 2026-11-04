@@ -1,0 +1,378 @@
+[
+  {
+    "id": "ee904eb7bc4c",
+    "query": "Restyle the UI: flat neutral surfaces, one blue accent, responsive layout",
+    "truth": [
+      "ui/index.html",
+      "ui/public/favicon.svg",
+      "ui/src/App.tsx",
+      "ui/src/Logo.tsx",
+      "ui/src/Sparkline.tsx",
+      "ui/src/builder/Builder.tsx",
+      "ui/src/pages/Components.tsx",
+      "ui/src/pages/Experiments.tsx",
+      "ui/src/pages/Overview.tsx",
+      "ui/src/pages/System.tsx",
+      "ui/src/styles.css"
+    ]
+  },
+  {
+    "id": "8619ff2ca7c5",
+    "query": "Rename templates with clearer, consistent component names",
+    "truth": [
+      "components/custom/command-runner.yaml",
+      "components/custom/starter.yaml",
+      "components/generative/gan.yaml",
+      "components/generative/vae.yaml",
+      "components/llm/lora-finetune.yaml",
+      "components/tabular/ann-classifier.yaml",
+      "components/tabular/deep-residual-mlp.yaml",
+      "components/tabular/mlp-classifier.yaml",
+      "components/tabular/residual-mlp.yaml",
+      "components/vision/image-classification.yaml",
+      "crates/sentinel-core/src/components.rs"
+    ]
+  },
+  {
+    "id": "ba3712dc2074",
+    "query": "Expose the training catalog: API, CLI and a Builder form",
+    "truth": [
+      "README.md",
+      "crates/sentinel-cli/src/main.rs",
+      "crates/sentinel-daemon/src/server.rs",
+      "tests/e2e_lifecycle.sh",
+      "ui/src/api.ts",
+      "ui/src/builder/Builder.tsx",
+      "ui/src/builder/Inspector.tsx",
+      "ui/src/builder/TrainingForm.tsx"
+    ]
+  },
+  {
+    "id": "519f3765d421",
+    "query": "Add training v2: tasks, loss catalog, optimizers, schedulers and training strategies",
+    "truth": [
+      "Cargo.lock",
+      "crates/sentinel-core/src/codegen.rs",
+      "crates/sentinel-core/src/graph.rs",
+      "crates/sentinel-core/src/lib.rs",
+      "crates/sentinel-core/src/predict.rs",
+      "crates/sentinel-core/src/training.rs",
+      "crates/sentinel-core/tests/test_training.rs",
+      "ui/src/api.ts",
+      "ui/src/pages/Experiments.tsx"
+    ]
+  },
+  {
+    "id": "5c58dc7f96aa",
+    "query": "Expand the activation catalog to 23 functions",
+    "truth": [
+      "crates/sentinel-core/src/blocks.rs",
+      "crates/sentinel-core/src/compound.rs",
+      "crates/sentinel-core/tests/test_activations.rs",
+      "ui/src/api.ts",
+      "ui/src/builder/Inspector.tsx"
+    ]
+  },
+  {
+    "id": "22e077a5d9b7",
+    "query": "Export trained models and predict on new data",
+    "truth": [
+      "README.md",
+      "crates/sentinel-cli/src/main.rs",
+      "crates/sentinel-cli/src/models.rs",
+      "crates/sentinel-core/src/codegen.rs",
+      "crates/sentinel-core/src/lib.rs",
+      "crates/sentinel-core/src/predict.rs",
+      "crates/sentinel-core/src/tracking.rs",
+      "crates/sentinel-core/tests/test_export.rs",
+      "crates/sentinel-daemon/src/server.rs",
+      "tests/e2e_lifecycle.sh",
+      "ui/src/api.ts",
+      "ui/src/pages/Experiments.tsx"
+    ]
+  },
+  {
+    "id": "080894cc76e6",
+    "query": "Add ten fundamental blocks for ViT, U-Net, VAE and graph attention",
+    "truth": [
+      "crates/sentinel-core/src/blocks.rs",
+      "crates/sentinel-core/src/codegen.rs",
+      "crates/sentinel-core/tests/test_new_blocks.rs",
+      "ui/src/builder/Builder.tsx",
+      "ui/src/styles.css"
+    ]
+  },
+  {
+    "id": "36906b548378",
+    "query": "Benchmark Sentinel's own footprint and cut its idle cost by 87%",
+    "truth": [
+      "README.md",
+      "crates/sentinel-cli/src/main.rs",
+      "crates/sentinel-core/src/vitals.rs",
+      "crates/sentinel-daemon/src/server.rs",
+      "tests/bench_footprint.py"
+    ]
+  },
+  {
+    "id": "0ec8f6efd1f2",
+    "query": "Design pass: tokens, accessible contrast, command palette, richer pages",
+    "truth": [
+      "ui/src/App.tsx",
+      "ui/src/CommandPalette.tsx",
+      "ui/src/Sparkline.tsx",
+      "ui/src/builder/BlockNode.tsx",
+      "ui/src/builder/Builder.tsx",
+      "ui/src/icons.tsx",
+      "ui/src/pages/Components.tsx",
+      "ui/src/pages/Experiments.tsx",
+      "ui/src/pages/Overview.tsx",
+      "ui/src/pages/Runs.tsx",
+      "ui/src/styles.css",
+      "ui/src/ui.tsx"
+    ]
+  },
+  {
+    "id": "14039d00c44e",
+    "query": "Replace the triangle favicon and brand mark with an original Sentinel mark",
+    "truth": [
+      "crates/sentinel-daemon/src/assets.rs",
+      "crates/sentinel-daemon/src/server.rs",
+      "ui/index.html",
+      "ui/public/favicon.svg",
+      "ui/src/Logo.tsx"
+    ]
+  },
+  {
+    "id": "e81255368c47",
+    "query": "Add System page with live vitals, history charts and null-safe GPU cards",
+    "truth": [
+      "ui/src/App.tsx",
+      "ui/src/LineChart.tsx",
+      "ui/src/api.ts",
+      "ui/src/hooks.ts",
+      "ui/src/pages/Overview.tsx",
+      "ui/src/pages/System.tsx",
+      "ui/src/styles.css"
+    ]
+  },
+  {
+    "id": "05fc6d7e2dec",
+    "query": "Add PR CI and extend the end-to-end lifecycle test",
+    "truth": [
+      ".github/workflows/ci.yml",
+      "tests/e2e_lifecycle.sh"
+    ]
+  },
+  {
+    "id": "9a941d35fb67",
+    "query": "Persist job history, embed the Python SDK, add a real `sentinel run`",
+    "truth": [
+      "crates/sentinel-cli/Cargo.toml",
+      "crates/sentinel-cli/src/main.rs",
+      "crates/sentinel-core/src/lib.rs",
+      "crates/sentinel-core/src/sdk.rs",
+      "crates/sentinel-daemon/src/lib.rs",
+      "crates/sentinel-daemon/src/server.rs",
+      "crates/sentinel-daemon/src/store.rs",
+      "crates/sentinel-daemon/src/supervisor.rs"
+    ]
+  },
+  {
+    "id": "dc6cc14de6ea",
+    "query": "Save the Builder canvas as a reusable component",
+    "truth": [
+      "crates/sentinel-core/src/authoring.rs",
+      "crates/sentinel-core/src/components.rs",
+      "crates/sentinel-core/src/lib.rs",
+      "crates/sentinel-daemon/src/server.rs",
+      "ui/src/api.ts",
+      "ui/src/builder/Builder.tsx",
+      "ui/src/builder/SaveModal.tsx"
+    ]
+  },
+  {
+    "id": "9eccbd98d553",
+    "query": "Add experiment tracking API and Experiments page with metric charts",
+    "truth": [
+      "crates/sentinel-core/src/codegen.rs",
+      "crates/sentinel-core/src/lib.rs",
+      "crates/sentinel-core/src/tracking.rs",
+      "crates/sentinel-core/tests/test_graph.rs",
+      "crates/sentinel-daemon/src/server.rs",
+      "ui/src/App.tsx",
+      "ui/src/LineChart.tsx",
+      "ui/src/api.ts",
+      "ui/src/pages/Experiments.tsx",
+      "ui/src/styles.css"
+    ]
+  },
+  {
+    "id": "e91741d07e29",
+    "query": "Build the dashboard once in release CI; update docs",
+    "truth": [
+      ".github/workflows/release.yml",
+      "FILES.md",
+      "README.md",
+      "guide.md"
+    ]
+  },
+  {
+    "id": "3092862a2eed",
+    "query": "add external dataset mounting and path resolution",
+    "truth": [
+      "FILES.md",
+      "README.md",
+      "crates/sentinel-core/src/models.rs",
+      "crates/sentinel-core/src/storage.rs",
+      "crates/sentinel-daemon/src/server.rs",
+      "datasets.yaml",
+      "packages/sentinel-sdk/pyproject.toml",
+      "packages/sentinel-sdk/src/sentinel/__init__.py",
+      "packages/sentinel-sdk/tests/test_sdk.py",
+      "pyproject.toml",
+      "uv.lock"
+    ]
+  },
+  {
+    "id": "8f51b2ada9bb",
+    "query": "dynamic workspace detection, path shortening and repository initialization",
+    "truth": [
+      "FILES.md",
+      "README.md",
+      "crates/sentinel-cli/src/main.rs",
+      "crates/sentinel-core/src/scaffold.rs",
+      "crates/sentinel-daemon/src/server.rs",
+      "guide.md",
+      "machines.yaml",
+      "sentinel.lock",
+      "sentinel.yaml"
+    ]
+  },
+  {
+    "id": "192d93fada25",
+    "query": "default run on 2512 port",
+    "truth": [
+      ".agents/skills/sentinel-integration/SKILL.md",
+      "README.md",
+      "crates/sentinel-cli/src/main.rs",
+      "crates/sentinel-core/src/models.rs",
+      "guide.md"
+    ]
+  },
+  {
+    "id": "be598d4639ef",
+    "query": "add guide and agent skill for sentinel integration",
+    "truth": [
+      ".agents/skills/sentinel-integration/SKILL.md",
+      "FILES.md",
+      "guide.md"
+    ]
+  },
+  {
+    "id": "5a1f00924985",
+    "query": "add comprehensive readme and update files documentation",
+    "truth": [
+      "FILES.md",
+      "README.md"
+    ]
+  },
+  {
+    "id": "4f768e3391ea",
+    "query": "add comprehensive stress and end-to-end integration test suite",
+    "truth": [
+      "crates/sentinel-agent/tests/test_agent_stress.rs",
+      "crates/sentinel-core/tests/test_edge_cases.rs",
+      "crates/sentinel-daemon/src/supervisor.rs",
+      "crates/sentinel-daemon/tests/test_stress.rs",
+      "packages/sentinel-sdk/tests/test_rigorous.py",
+      "tests/e2e_lifecycle.sh"
+    ]
+  },
+  {
+    "id": "027d2164d07c",
+    "query": "configure maturin wheels and github actions release workflow",
+    "truth": [
+      ".github/workflows/release.yml",
+      "crates/sentinel-cli/pyproject.toml"
+    ]
+  },
+  {
+    "id": "c2e50ba6466f",
+    "query": "implement optuna asha hyperparameter sweep orchestrator",
+    "truth": [
+      "crates/sentinel-cli/src/main.rs",
+      "recipes/sweep_orchestrator.py"
+    ]
+  },
+  {
+    "id": "8e807519c331",
+    "query": "implement low-overhead web ui dashboard and idle controller",
+    "truth": [
+      "Cargo.lock",
+      "crates/sentinel-daemon/Cargo.toml",
+      "crates/sentinel-daemon/src/server.rs"
+    ]
+  },
+  {
+    "id": "374f34609056",
+    "query": "implement outbound remote agent with offline disk buffer",
+    "truth": [
+      "Cargo.lock",
+      "crates/sentinel-agent/Cargo.toml",
+      "crates/sentinel-agent/src/client.rs"
+    ]
+  },
+  {
+    "id": "8fa35e42bb94",
+    "query": "implement axum daemon http and websocket api",
+    "truth": [
+      "Cargo.lock",
+      "crates/sentinel-cli/Cargo.toml",
+      "crates/sentinel-cli/src/main.rs",
+      "crates/sentinel-daemon/Cargo.toml",
+      "crates/sentinel-daemon/src/scheduler.rs",
+      "crates/sentinel-daemon/src/server.rs",
+      "crates/sentinel-daemon/src/supervisor.rs"
+    ]
+  },
+  {
+    "id": "4de0f17d3389",
+    "query": "implement python sdk mlflow storage and script exporter",
+    "truth": [
+      "crates/sentinel-cli/src/main.rs",
+      "crates/sentinel-core/src/export.rs",
+      "crates/sentinel-core/src/lib.rs",
+      "packages/sentinel-sdk/README.md",
+      "packages/sentinel-sdk/pyproject.toml",
+      "packages/sentinel-sdk/src/sentinel/__init__.py",
+      "packages/sentinel-sdk/tests/test_sdk.py"
+    ]
+  },
+  {
+    "id": "e25045d3add0",
+    "query": "implement project generator and sentinel new cli",
+    "truth": [
+      "crates/sentinel-cli/src/main.rs",
+      "crates/sentinel-core/src/lib.rs",
+      "crates/sentinel-core/src/scaffold.rs"
+    ]
+  },
+  {
+    "id": "db2b818ebfb6",
+    "query": "add reference templates and synthetic smoke test",
+    "truth": [
+      "pyproject.toml",
+      "recipes/vision_train.py",
+      "uv.lock"
+    ]
+  },
+  {
+    "id": "4bae17e4eef7",
+    "query": "add core models and config parser",
+    "truth": [
+      "crates/sentinel-core/src/config.rs",
+      "crates/sentinel-core/src/lib.rs",
+      "crates/sentinel-core/src/models.rs"
+    ]
+  }
+]
