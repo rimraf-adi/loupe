@@ -1,0 +1,30 @@
+[package]
+name = "loupe-model"
+description = "Downloadable local embedding models: registry, checksummed fetch, optional candle runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Compile the candle-based neural embedder. Off by default; the hashing embedder is the fallback.
+real-embedder = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers", "dep:loupe-embed", "dep:serde_json"]
+# Apple Accelerate BLAS (macOS only).
+accelerate = ["real-embedder", "candle-core/accelerate", "candle-nn/accelerate", "candle-transformers/accelerate"]
+
+[dependencies]
+loupe-core.workspace = true
+loupe-embed = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+sha2 = "0.10"
+candle-core = { version = "0.9.2", optional = true }
+candle-nn = { version = "0.9.2", optional = true }
+candle-transformers = { version = "0.9.2", optional = true }
+tokenizers = { version = "0.21", default-features = false, features = ["onig"], optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -352,6 +352,80 @@ What I did not do or verify:
   is not handled.
 - Worst case at the default budget (500k files, 2 GiB) is extrapolated from the table, not measured.
 
+## M7b result: real embedder
+
+Spike and model choice: [docs/embedder-spike.md](embedder-spike.md). Built: new crate `loupe-model`
+(model registry with pinned revision and SHA-256 per file; `curl`-based checksummed downloader; candle
+BERT embedder behind the `real-embedder` feature), CLI `loupe model list|fetch|verify`, global
+`--embedder <hashing|id>` / `LOUPE_EMBEDDER` on `loupe` and `eval`. Default build is unchanged: no
+candle compiled, hashing embedder, nothing downloaded. Segments and the vector cache were already
+keyed by model id, so switching models rebuilds embeddings only (existing tests cover this). int8
+quantisation is unchanged.
+
+Model evaluated: `sentence-transformers/all-MiniLM-L6-v2`, 90.9 MB safetensors (97 MB on disk with
+tokenizer/config), Apache-2.0, downloaded once from huggingface.co into
+`~/.cache/loupe/models/minilm-l6-v2/` through `loupe model fetch`. Weights are not committed. It is a
+general English model, not a code model.
+
+**Eval set changed.** The four repos have gained history since M8, so re-mining gives **n = 129** tasks
+(attendance-backend 49, daily-bugle 7, dialect-norm 42, sentinel 31), not 85. All arms below,
+including hashing, were re-run on these same 129 tasks, so the comparison is fair, but the numbers are
+not comparable to M8's table. Same split rule as M8: tune = attendance-backend (49), held-out = the
+other three (80).
+
+Pooled recall (task-weighted):
+
+| Arm | R@5 | R@10 | R@20 | held-out R@5 / R@10 / R@20 |
+|---|---|---|---|---|
+| ripgrep / text index | 0.288 | 0.390 | 0.485 | 0.336 / 0.469 / 0.609 |
+| semantic only, hashing | 0.188 | 0.274 | 0.385 | 0.196 / 0.300 / 0.428 |
+| **semantic only, MiniLM** | 0.285 | 0.392 | 0.491 | 0.312 / 0.422 / 0.526 |
+| hybrid, hashing (defaults) | 0.303 | 0.433 | 0.536 | 0.342 / 0.508 / 0.633 |
+| **hybrid, MiniLM (defaults)** | **0.324** | **0.447** | **0.581** | 0.352 / 0.498 / 0.652 |
+
+Reading it plainly:
+- **The real model fixes the stand-in's main failure: semantic-only goes from clearly worse than
+  keywords (0.188) to level with them (0.285 vs 0.288 R@5, 0.491 vs 0.485 R@20).** It does not beat
+  lexical on its own. On the tune repo it is better than lexical (0.240/0.342/0.433 vs
+  0.209/0.262/0.283), on the held-out repos it is worse (0.312/0.422/0.526 vs 0.336/0.469/0.609).
+- **Hybrid with the real model beats lexical** by +0.036 R@5, +0.057 R@10, +0.096 R@20 pooled, and
+  beats the hashing hybrid by +0.021/+0.014/+0.045. On held-out the hybrid gain over lexical is
+  +0.016/+0.029/+0.043. These gains are modest and n is small (129 tasks, mostly tiny repos); the
+  R@20 gain is the most convincing, R@5 differences are within a few tasks.
+
+**Re-tuning (RRF constant x semantic weight, graph off; 20 combinations per embedder).** Rule fixed
+beforehand, as in M8: best summed R@5+R@10+R@20 on the tune split, reject anything that regresses
+held-out versus the text baseline. For MiniLM the best tune score is the existing default (rrf 8,
+semantic weight 0.2: tune sum 1.107; next best 1.088), so **defaults are unchanged**. Several other
+settings score higher on held-out (e.g. rrf 15 / sem 0.4: 0.382/0.537/0.658, rrf 8 / sem 0.7:
+0.380/0.538/0.659) and on all-repo R@10, but picking them would be tuning on the held-out set, so I did
+not. The stronger model does make a higher semantic weight look plausible (0.4-0.7), but with one
+tune repo of 49 tasks that is a hypothesis for more data, not a finding. For hashing the sweep also
+agrees with the old defaults.
+
+**Cost (measured on a 1,484-file subset of the cargo registry; the 20k-file numbers are extrapolated, not measured).**
+
+| | hashing | MiniLM |
+|---|---|---|
+| indexing 1,484 files | 2.6 s | 298 s (~76 chunks/s over ~22.7k chunks) |
+| peak RSS | 172 MB | 2.17 GB |
+| index size | 31.4 MB | 50.6 MB (384-d int8 vectors + a vector cache that duplicates them) |
+
+Extrapolating linearly to the ~22.7k-file / ~411k-chunk corpus of M7 (32k files now in the registry): about
+**1.5 hours** for a cold embed, versus 33 s with hashing, and roughly +0.3 GB of index (about 388
+bytes per chunk, twice with the cache). Warm re-indexes only embed changed chunks (cache is keyed by
+model id + chunk text), so this is a one-time cost per model per tree. I did not run the 20k-file
+tree because it would take over an hour; treat these as estimates. The 2.2 GB peak comes from
+rayon running many forward passes in parallel and should be bounded (fewer embed threads) before
+anyone runs this on a laptop in the background.
+
+Not done / open: a code-trained model (CodeSage-small, jina-embeddings-v2-base-code) was not tried
+(CodeSage has no safetensors/ONNX and no candle port; Jina-code's fp32 file is 322 MB and ~5x the
+compute); `fetch` shells out to `curl`; background embedding for slow models (see M7 result) is still
+not implemented, so `loupe index` blocks for the whole embed; no test downloads weights, so the
+neural embedder is only exercised by the eval, not by `cargo test`; the daemon and MCP server pick up
+`--embedder`/`LOUPE_EMBEDDER` but I only measured through the eval and CLI index paths.
+
 ## Open questions
 
 - **Does Loupe help an agent?** No end-to-end evidence yet. The localization eval (85 tasks, small
@@ -364,3 +438,4 @@ What I did not do or verify:
 - STEP1 VERDICT: NOT RUN. Harness is ready (`bench/agent/run.py`, `docs/agent-benchmark.md`) but the
   bundled `claude` CLI is not logged in and no API key is set, so no real-model result exists.
   Later steps that gate on "WORSE" should treat this as unknown, not as a pass.
+- STEP2: real embedder integrated behind `--features real-embedder` (MiniLM-L6-v2, candle, `loupe model fetch`, pinned checksums). Semantic-only now ties lexical (R@5 0.285 vs 0.288, was 0.188 with hashing) rather than beating it; hybrid beats lexical modestly (R@5/10/20 0.324/0.447/0.581 vs 0.288/0.390/0.485, n=129). Defaults unchanged after the tune/held-out rule. Cost: ~76 chunks/s, 2.2 GB RSS, ~1.5 h estimated for 20k files (extrapolated). Section "M7b result".

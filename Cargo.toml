@@ -25,6 +25,7 @@ loupe-proto = { path = "crates/loupe-proto" }
 loupe-api = { path = "crates/loupe-api" }
 loupe-daemon = { path = "crates/loupe-daemon" }
 loupe-mcp = { path = "crates/loupe-mcp" }
+loupe-model = { path = "crates/loupe-model" }
 
 # External: add each in the milestone that uses it.
 anyhow = "1"

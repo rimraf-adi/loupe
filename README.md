@@ -125,8 +125,11 @@ Full design and the evidence behind each claim: [docs/v1.md](docs/v1.md) and
 
 ## Honest limitations
 
-- Semantic search currently uses a deterministic subword-hashing embedder, not a trained model. It
-  is a stand-in behind an `Embedder` trait; measured results are in `docs/progress.md`.
+- Semantic search defaults to a deterministic subword-hashing embedder (weak). An optional local
+  neural model is available: build with `--features real-embedder` (add `accelerate` on macOS), run
+  `loupe model fetch minilm-l6-v2` (downloads 91 MB, checksum-verified, only when you run it), then
+  use `--embedder minilm-l6-v2` (or `LOUPE_EMBEDDER`). It is slow to index (~76 chunks/s) and uses
+  ~2 GB RAM while indexing; see "M7b result" in `docs/progress.md` and `docs/embedder-spike.md`.
 - Repo and module summaries are heuristic unless you plug in an LLM through the callback
   summarizer.
 - No Windows runtime yet; no SCIP/LSIF ingest.

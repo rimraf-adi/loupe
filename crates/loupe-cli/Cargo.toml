@@ -14,7 +14,13 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
+[features]
+# Neural embedder (candle). Off by default; `--embedder <id>` then selects a fetched model.
+real-embedder = ["loupe-model/real-embedder"]
+accelerate = ["loupe-model/accelerate"]
+
 [dependencies]
+loupe-model.workspace = true
 loupe-api.workspace = true
 loupe-daemon.workspace = true
 loupe-proto.workspace = true

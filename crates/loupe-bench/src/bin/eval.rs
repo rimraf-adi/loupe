@@ -14,6 +14,9 @@ use loupe_core::Config;
 #[derive(Parser)]
 #[command(about = "Task-level localization eval")]
 struct Cli {
+    /// `hashing` (default) or a fetched model id (needs `--features real-embedder`).
+    #[arg(long, global = true, default_value = "hashing")]
+    embedder: String,
     #[command(subcommand)]
     command: Cmd,
 }
@@ -53,8 +56,7 @@ enum Cmd {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let embedder: std::sync::Arc<dyn loupe_api::Embedder> =
-        std::sync::Arc::new(loupe_api::HashingEmbedder::default());
+    let embedder = pick_embedder(&cli.embedder)?;
     loupe_api::set_default_embedder(embedder.clone());
     match cli.command {
         Cmd::Mine {
@@ -148,41 +150,11 @@ fn main() -> anyhow::Result<()> {
                 f(&mut o);
                 o
             };
-            let variants = [
-                ("sem0.2+gr0.3", base(&|_| {})),
-                ("rrf30", base(&|o| o.rrf_k = 30.0)),
-                ("rrf15", base(&|o| o.rrf_k = 15.0)),
-                ("rrf8", base(&|o| o.rrf_k = 8.0)),
+            // Fusion sweep: RRF constant x semantic weight, graph off (it is opt-in).
+            let mut variants: Vec<(String, loupe_api::QueryOptions)> = vec![
+                ("defaults".to_string(), full.clone()),
                 (
-                    "rrf8+sem0.4",
-                    base(&|o| {
-                        o.rrf_k = 8.0;
-                        o.semantic_weight = 0.4;
-                    }),
-                ),
-                (
-                    "rrf8+nograph",
-                    base(&|o| {
-                        o.rrf_k = 8.0;
-                        o.use_graph = false;
-                    }),
-                ),
-                (
-                    "rrf15+nograph",
-                    base(&|o| {
-                        o.rrf_k = 15.0;
-                        o.use_graph = false;
-                    }),
-                ),
-                (
-                    "rrf8+gr0.6",
-                    base(&|o| {
-                        o.rrf_k = 8.0;
-                        o.graph_weight = 0.6;
-                    }),
-                ),
-                (
-                    "text+symbols",
+                    "text+symbols".to_string(),
                     base(&|o| {
                         o.use_semantic = false;
                         o.use_graph = false;
@@ -190,8 +162,20 @@ fn main() -> anyhow::Result<()> {
                     }),
                 ),
             ];
+            for rrf in [8.0f32, 15.0, 30.0, 60.0] {
+                for sem in [0.2f32, 0.4, 0.7, 1.0, 1.5] {
+                    variants.push((
+                        format!("g rrf{rrf}/sem{sem}"),
+                        base(&|o| {
+                            o.rrf_k = rrf;
+                            o.semantic_weight = sem;
+                            o.use_graph = false;
+                        }),
+                    ));
+                }
+            }
             for (label, opts) in variants {
-                arms.push(Box::new(QueryArm::new(label, &idx, opts)?));
+                arms.push(Box::new(QueryArm::new(&label, &idx, opts)?));
             }
             if RipgrepArm::available() {
                 arms.insert(0, Box::new(RipgrepArm { root }));
@@ -206,6 +190,25 @@ fn main() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+fn pick_embedder(id: &str) -> anyhow::Result<std::sync::Arc<dyn loupe_api::Embedder>> {
+    if id == "hashing" {
+        return Ok(std::sync::Arc::new(loupe_api::HashingEmbedder::default()));
+    }
+    #[cfg(feature = "real-embedder")]
+    {
+        let spec = loupe_model::lookup(id).ok_or_else(|| anyhow::anyhow!("unknown model {id}"))?;
+        let root = loupe_model::models_dir();
+        match loupe_model::status(spec, &root) {
+            loupe_model::ModelStatus::Ready(dir) => Ok(std::sync::Arc::new(
+                loupe_model::BertEmbedder::load(spec, &dir)?,
+            )),
+            _ => anyhow::bail!("model {id} not fetched; run `loupe model fetch {id}`"),
+        }
+    }
+    #[cfg(not(feature = "real-embedder"))]
+    anyhow::bail!("embedder {id} needs --features real-embedder")
 }
 
 fn print_report(r: &ArmReport) {

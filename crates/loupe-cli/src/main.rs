@@ -11,6 +11,11 @@ use tracing_subscriber::EnvFilter;
 #[derive(Parser)]
 #[command(name = "loupe", version, about = "Fast queryable codebase index")]
 struct Cli {
+    /// Embedding model: `hashing` (built in, default) or a fetched model id (see `loupe model
+    /// list`; needs a build with `--features real-embedder`). Switching models rebuilds only the
+    /// embeddings, on the next index update.
+    #[arg(long, global = true, env = "LOUPE_EMBEDDER", default_value = "hashing")]
+    embedder: String,
     #[command(subcommand)]
     command: Command,
 }
@@ -70,6 +75,11 @@ impl RepoArgs {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Manage downloadable embedding models. Nothing is downloaded unless you run `fetch`.
+    Model {
+        #[command(subcommand)]
+        action: ModelCmd,
+    },
     /// Print the resolved configuration for a repo root.
     Config(RepoArgs),
     /// Walk the repo and update the index. A rerun on an unchanged repo reads nothing.
@@ -273,6 +283,99 @@ enum Command {
 }
 
 #[derive(Subcommand)]
+enum ModelCmd {
+    /// List known models and whether they are present in the model directory.
+    List,
+    /// Download a model into ~/.cache/loupe/models/<id>/ (or $LOUPE_MODEL_DIR) and verify its
+    /// pinned SHA-256 checksums.
+    Fetch { id: String },
+    /// Re-hash a fetched model's files against the pinned checksums.
+    Verify { id: String },
+}
+
+fn model_cmd(action: ModelCmd) -> anyhow::Result<()> {
+    let root = loupe_model::models_dir();
+    let spec_of = |id: &str| {
+        loupe_model::lookup(id).ok_or_else(|| {
+            let known: Vec<_> = loupe_model::REGISTRY.iter().map(|m| m.id).collect();
+            anyhow::anyhow!("unknown model `{id}`; known: {}", known.join(", "))
+        })
+    };
+    match action {
+        ModelCmd::List => {
+            println!("model dir: {}", root.display());
+            for m in loupe_model::REGISTRY {
+                let st = match loupe_model::status(m, &root) {
+                    loupe_model::ModelStatus::Ready(_) => "fetched",
+                    loupe_model::ModelStatus::Missing => "not fetched",
+                    loupe_model::ModelStatus::Corrupt(_) => "CORRUPT (run `loupe model fetch`)",
+                };
+                println!(
+                    "{}  {} dim, {:.0} MB, {}, {}  [{}]",
+                    m.id,
+                    m.dim,
+                    m.total_bytes() as f64 / 1e6,
+                    m.license,
+                    m.repo,
+                    st
+                );
+            }
+        }
+        ModelCmd::Fetch { id } => {
+            let spec = spec_of(&id)?;
+            eprintln!(
+                "fetching {} from huggingface.co/{} ({:.0} MB, {})",
+                spec.id,
+                spec.repo,
+                spec.total_bytes() as f64 / 1e6,
+                spec.license
+            );
+            let dir = loupe_model::fetch(spec, &root)?;
+            println!("ready: {}", dir.display());
+        }
+        ModelCmd::Verify { id } => {
+            let spec = spec_of(&id)?;
+            match loupe_model::verify(spec, &root)? {
+                loupe_model::ModelStatus::Ready(d) => println!("ok: {}", d.display()),
+                loupe_model::ModelStatus::Missing => anyhow::bail!("{id} is not fetched"),
+                loupe_model::ModelStatus::Corrupt(why) => anyhow::bail!("{id} is corrupt: {why}"),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Install the embedder chosen by `--embedder` as the process default. `hashing` changes nothing.
+fn select_embedder(id: &str) -> anyhow::Result<()> {
+    if id == "hashing" {
+        return Ok(());
+    }
+    #[cfg(feature = "real-embedder")]
+    {
+        let spec = loupe_model::lookup(id).ok_or_else(|| {
+            anyhow::anyhow!("unknown embedder `{id}`; use `hashing` or see `loupe model list`")
+        })?;
+        let root = loupe_model::models_dir();
+        match loupe_model::status(spec, &root) {
+            loupe_model::ModelStatus::Ready(dir) => {
+                let e = loupe_model::BertEmbedder::load(spec, &dir)?;
+                loupe_api::set_default_embedder(std::sync::Arc::new(e));
+                Ok(())
+            }
+            _ => anyhow::bail!(
+                "model `{id}` is not fetched (or damaged); run `loupe model fetch {id}`"
+            ),
+        }
+    }
+    #[cfg(not(feature = "real-embedder"))]
+    {
+        anyhow::bail!(
+            "embedder `{id}` needs a build with `--features real-embedder`; this build only has `hashing`"
+        )
+    }
+}
+
+#[derive(Subcommand)]
 enum DaemonCmd {
     /// Run in the foreground until stopped. Takes the writer lock and keeps the index fresh.
     Run {
@@ -303,7 +406,12 @@ fn init_tracing() {
 
 fn main() -> anyhow::Result<()> {
     init_tracing();
-    match Cli::parse().command {
+    let cli = Cli::parse();
+    if !matches!(cli.command, Command::Model { .. }) {
+        select_embedder(&cli.embedder)?;
+    }
+    match cli.command {
+        Command::Model { action } => model_cmd(action)?,
         Command::Config(repo) => {
             let config = repo.config()?;
             tracing::debug!(?config, "resolved config");

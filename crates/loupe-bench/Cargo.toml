@@ -10,7 +10,12 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+real-embedder = ["dep:loupe-model", "loupe-model/real-embedder"]
+accelerate = ["loupe-model/accelerate"]
+
 [dependencies]
+loupe-model = { workspace = true, optional = true }
 loupe-core.workspace = true
 loupe-api.workspace = true
 loupe-daemon.workspace = true
