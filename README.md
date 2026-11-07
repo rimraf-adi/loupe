@@ -1,42 +1,57 @@
 # Loupe v0
 
-A lightweight, zero-latency MCP code-reading server designed to stop AI coding agents from reading files in dozens of 30–50 line windows with multi-second thinking pauses between each hop.
+A lightweight, zero-latency MCP code reader and symbol navigator designed to eliminate AI agent "windowed reads" (repeated 30–50 line reads with 7–13s thinking delays between hops) and "call-following" round trips.
 
-## Key Capabilities (Phase 1)
+## The Three Core Tools
 
-1. **Batched Reads (`read_files`)**: Read multiple full files or multiple discrete line ranges across several files in a single MCP tool call.
-2. **Line-Numbered & Formatted**: Clean line numbering (`   1 | ...`) with explicit markers indicating omitted lines.
-3. **Budgeted Context**: Token budget enforcement (default: 12,000 tokens ≈ 48,000 characters) prevents overflowing the model's context window.
-4. **Session Deduplication**: Tracks content hashes (BLAKE3) of files returned during the active session. If an agent asks for the same unchanged file again without specifying line ranges, Loupe returns an ultra-compact stub instead of dumping the file again.
+| Tool | Input | Output | What It Solves |
+|---|---|---|---|
+| `read_files` | `files: [{path, ranges?}]`, `max_tokens?` | Whole files or multiple requested line ranges formatted with line numbers. Deduplicates unchanged files across the session. | Stops repetitive 30–50 line chunking and re-reading unchanged code. |
+| `outline` | `path_or_glob`, `paths?`, `max_tokens?` | Symbols (`fn`, `struct`, `impl`, `enum`, `trait`, `class`, `interface`) with kind, signature, and exact line ranges (`L{start}-L{end}`). | Gives a fast architectural map without scanning raw source. |
+| `symbol` | `name`, `path?`, `max_tokens?` | Complete line-numbered body of the symbol, plus signatures of functions it calls (callees) and references where it is called (callers). | Eliminates "read-then-follow-the-call" hops. |
 
 ---
 
-## Build
+## Language Support (Tree-sitter)
+
+- **Rust** (`.rs`)
+- **Python** (`.py`)
+- **TypeScript & JavaScript** (`.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, `.mjs`)
+
+---
+
+## Building
 
 ```bash
 cargo build --release
 ```
 
-Binary will be at `target/release/loupe`.
+The optimized binary is created at `target/release/loupe`.
 
 ---
 
-## Direct CLI Usage (Quick Verification)
+## CLI Usage (Direct Testing)
 
 ```bash
-# Dump files with line numbers
-./target/release/loupe read src/main.rs src/mcp.rs
+# Read files with line numbers
+./target/release/loupe read src/cache.rs
+
+# Outline symbols in a file or glob
+./target/release/loupe outline "src/*.rs"
+
+# Inspect symbol body, callees, and callers
+./target/release/loupe symbol execute_outline
 ```
 
 ---
 
 ## MCP Server Configuration
 
-Loupe speaks standard JSON-RPC 2.0 over `stdio`.
+Loupe runs as a standard JSON-RPC 2.0 stdio MCP server.
 
-### In Antigravity / Gemini Clients
+### Adding to Antigravity / Gemini Clients
 
-Add Loupe to your MCP configuration (e.g. in your settings or plugin config):
+In your client's MCP configuration (e.g. `mcp_config.json`):
 
 ```json
 {
@@ -51,10 +66,21 @@ Add Loupe to your MCP configuration (e.g. in your settings or plugin config):
 
 ### Agent Instruction Rules
 
-Included in [`GEMINI.md`](GEMINI.md) and [`.gemini/rules/loupe.md`](.gemini/rules/loupe.md):
+To steer coding agents to use Loupe automatically, add the following to `GEMINI.md` or `.gemini/rules/loupe.md`:
 
 ```markdown
-- To read code, call `loupe.read_files` with all files you need in one call. Do not read files in small ranges.
-- Plan all edits after reading. Apply them together.
-- Use `loupe.symbol` instead of opening a file to follow a call.
+# Loupe Rules for Coding Agents
+
+1. **Batch Code Reads**:
+   - Call `loupe.read_files` with all target files in one call.
+   - Do NOT read files in small 30-50 line sliding windows.
+   - If you need specific sections, pass their line ranges together in `ranges: [[start1, end1], [start2, end2]]`.
+
+2. **Symbol Navigation**:
+   - Use `loupe.outline` to locate symbols and line ranges before reading entire large files.
+   - Use `loupe.symbol` to inspect a function/class along with its callees and callers instead of opening files step-by-step.
+
+3. **Batch Edits**:
+   - Plan edits after reading; apply them together.
+   - Loupe automatically deduplicates unchanged files within a session to save context and hops.
 ```

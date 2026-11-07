@@ -1,6 +1,6 @@
 use serde_json::json;
 use std::fs::File;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use tempfile::tempdir;
 
@@ -11,15 +11,25 @@ fn test_mcp_full_session_flow() {
     let file_b = dir.path().join("b.rs");
 
     let mut fa = File::create(&file_a).unwrap();
-    writeln!(fa, "fn alpha() -> i32 {{\n    42\n}}").unwrap();
+    writeln!(
+        fa,
+        "pub fn beta() -> i32 {{\n    10\n}}\n\npub fn alpha() -> i32 {{\n    beta() + 32\n}}"
+    )
+    .unwrap();
 
     let mut fb = File::create(&file_b).unwrap();
     for i in 1..=100 {
-        writeln!(fb, "// Line number {i}").unwrap();
+        if i == 50 {
+            writeln!(fb, "let val = alpha();").unwrap();
+        } else {
+            writeln!(fb, "// Line number {i}").unwrap();
+        }
     }
 
-    // Spawn loupe process
+    // Spawn loupe process with base dir
     let mut child = Command::new(env!("CARGO_BIN_EXE_loupe"))
+        .arg("--dir")
+        .arg(dir.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -27,8 +37,7 @@ fn test_mcp_full_session_flow() {
 
     let mut stdin = child.stdin.take().expect("Failed to open stdin");
     let stdout = child.stdout.take().expect("Failed to open stdout");
-    let mut reader = std::io::BufReader::new(stdout);
-    use std::io::BufRead;
+    let mut reader = BufReader::new(stdout);
 
     // 1. Initialize
     let init_req = json!({
@@ -58,6 +67,8 @@ fn test_mcp_full_session_flow() {
     assert_eq!(list_resp["id"], 2);
     let tools = list_resp["result"]["tools"].as_array().unwrap();
     assert!(tools.iter().any(|t| t["name"] == "read_files"));
+    assert!(tools.iter().any(|t| t["name"] == "outline"));
+    assert!(tools.iter().any(|t| t["name"] == "symbol"));
 
     // 3. Call read_files on both files in one batched call
     let call_req = json!({
@@ -83,8 +94,7 @@ fn test_mcp_full_session_flow() {
     let call_resp: serde_json::Value = serde_json::from_str(&line).unwrap();
     let text = call_resp["result"]["content"][0]["text"].as_str().unwrap();
 
-    // Verify both files are in the single batched response
-    assert!(text.contains("fn alpha() -> i32"));
+    assert!(text.contains("pub fn alpha() -> i32"));
     assert!(text.contains("// Line number 10"));
     assert!(text.contains("// Line number 15"));
     assert!(text.contains("// Line number 90"));
@@ -110,6 +120,51 @@ fn test_mcp_full_session_flow() {
     let dedup_resp: serde_json::Value = serde_json::from_str(&line).unwrap();
     let dedup_text = dedup_resp["result"]["content"][0]["text"].as_str().unwrap();
     assert!(dedup_text.contains("UNCHANGED in session"));
+
+    // 5. Call outline on a.rs
+    let outline_req = json!({
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "tools/call",
+        "params": {
+            "name": "outline",
+            "arguments": {
+                "path_or_glob": file_a.to_str().unwrap()
+            }
+        }
+    });
+    writeln!(stdin, "{}", serde_json::to_string(&outline_req).unwrap()).unwrap();
+    line.clear();
+    reader.read_line(&mut line).unwrap();
+    let outline_resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let outline_text = outline_resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(outline_text.contains("alpha"));
+    assert!(outline_text.contains("beta"));
+    assert!(outline_text.contains("fn"));
+
+    // 6. Call symbol on alpha
+    let symbol_req = json!({
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "tools/call",
+        "params": {
+            "name": "symbol",
+            "arguments": {
+                "name": "alpha"
+            }
+        }
+    });
+    writeln!(stdin, "{}", serde_json::to_string(&symbol_req).unwrap()).unwrap();
+    line.clear();
+    reader.read_line(&mut line).unwrap();
+    let symbol_resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let symbol_text = symbol_resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(symbol_text.contains("=== Symbol: alpha"));
+    assert!(symbol_text.contains("beta() + 32"));
+    assert!(symbol_text.contains("Calls (callees):"));
+    assert!(symbol_text.contains("beta"));
+    assert!(symbol_text.contains("Referenced by (callers):"));
+    assert!(symbol_text.contains("let val = alpha();"));
 
     drop(stdin);
     let _ = child.wait();

@@ -1,5 +1,7 @@
 use crate::cache::SessionCache;
+use crate::outline::{execute_outline, OutlineArgs};
 use crate::reader::{execute_read_files, ReadFilesArgs};
+use crate::symbol::{execute_symbol, SymbolArgs};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
@@ -120,6 +122,50 @@ impl McpServer {
                                 },
                                 "required": ["files"]
                             }
+                        },
+                        {
+                            "name": "outline",
+                            "description": "Extracts high-level symbols (functions, structs, impls, classes, enums, traits, interfaces) with their signatures and exact line ranges. Use this to quickly map a whole file or project directory before reading.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "path_or_glob": {
+                                        "type": "string",
+                                        "description": "File path (e.g. 'src/main.rs') or glob pattern (e.g. 'src/**/*.rs', 'crates/**/*.py')."
+                                    },
+                                    "paths": {
+                                        "type": "array",
+                                        "description": "Optional list of multiple file paths or globs to outline in one call.",
+                                        "items": { "type": "string" }
+                                    },
+                                    "max_tokens": {
+                                        "type": "integer",
+                                        "description": "Token budget for the outline response (default 12000)."
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "name": "symbol",
+                            "description": "Retrieves the full body of a symbol with line numbers, plus signatures of what it calls (callees) and locations where it is called (callers). Solves call-following hops in one single tool call.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "description": "Exact name of the symbol (function, method, struct, class) to inspect."
+                                    },
+                                    "path": {
+                                        "type": "string",
+                                        "description": "Optional file path where the symbol is defined to speed up search."
+                                    },
+                                    "max_tokens": {
+                                        "type": "integer",
+                                        "description": "Token budget for the symbol inspection (default 12000)."
+                                    }
+                                },
+                                "required": ["name"]
+                            }
                         }
                     ]
                 });
@@ -165,6 +211,82 @@ impl McpServer {
                                     {
                                         "type": "text",
                                         "text": format!("Invalid arguments for read_files: {}", e)
+                                    }
+                                ],
+                                "isError": true
+                            });
+                            Some(JsonRpcResponse {
+                                jsonrpc: "2.0",
+                                id,
+                                result: Some(err_res),
+                                error: None,
+                            })
+                        }
+                    },
+                    "outline" => match serde_json::from_value::<OutlineArgs>(arguments) {
+                        Ok(args) => {
+                            let (text, _sym_count, _truncated) =
+                                execute_outline(args, self.working_dir.as_deref());
+                            let tool_res = json!({
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": text
+                                    }
+                                ],
+                                "isError": false
+                            });
+                            Some(JsonRpcResponse {
+                                jsonrpc: "2.0",
+                                id,
+                                result: Some(tool_res),
+                                error: None,
+                            })
+                        }
+                        Err(e) => {
+                            let err_res = json!({
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": format!("Invalid arguments for outline: {}", e)
+                                    }
+                                ],
+                                "isError": true
+                            });
+                            Some(JsonRpcResponse {
+                                jsonrpc: "2.0",
+                                id,
+                                result: Some(err_res),
+                                error: None,
+                            })
+                        }
+                    },
+                    "symbol" => match serde_json::from_value::<SymbolArgs>(arguments) {
+                        Ok(args) => {
+                            let (text, _truncated) =
+                                execute_symbol(args, self.working_dir.as_deref());
+                            let tool_res = json!({
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": text
+                                    }
+                                ],
+                                "isError": false
+                            });
+                            Some(JsonRpcResponse {
+                                jsonrpc: "2.0",
+                                id,
+                                result: Some(tool_res),
+                                error: None,
+                            })
+                        }
+                        Err(e) => {
+                            let err_res = json!({
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": format!("Invalid arguments for symbol: {}", e)
                                     }
                                 ],
                                 "isError": true

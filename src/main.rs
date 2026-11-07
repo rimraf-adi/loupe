@@ -1,6 +1,9 @@
 mod cache;
 mod mcp;
+mod outline;
+mod parser;
 mod reader;
+mod symbol;
 
 use mcp::McpServer;
 use std::env;
@@ -10,8 +13,10 @@ fn print_usage() {
     eprintln!(
         "Loupe v{} - Fast code reader MCP server for AI coding agents\n\n\
         USAGE:\n  \
-          loupe [OPTIONS]\n  \
-          loupe read <files...>\n\n\
+          loupe [OPTIONS]                 Run as stdio MCP server\n  \
+          loupe read <files...>           CLI tool to read files with line numbers\n  \
+          loupe outline <path_or_glob>    CLI tool to inspect symbol tree\n  \
+          loupe symbol <name> [path]      CLI tool to inspect symbol body, callees & callers\n\n\
         OPTIONS:\n  \
           --dir <PATH>   Base directory for resolving relative paths\n  \
           --help         Print help\n  \
@@ -42,7 +47,6 @@ fn main() -> anyhow::Result<()> {
                 }
             }
             "read" => {
-                // CLI convenience mode for testing
                 let files: Vec<reader::FileReadTarget> = args[idx + 1..]
                     .iter()
                     .map(|f| reader::FileReadTarget::Simple(PathBuf::from(f)))
@@ -57,6 +61,39 @@ fn main() -> anyhow::Result<()> {
                     working_dir.as_deref(),
                 );
                 print!("{}", res.text);
+                return Ok(());
+            }
+            "outline" => {
+                let target = args.get(idx + 1).cloned();
+                let (text, _, _) = outline::execute_outline(
+                    outline::OutlineArgs {
+                        path_or_glob: target,
+                        paths: None,
+                        max_tokens: None,
+                    },
+                    working_dir.as_deref(),
+                );
+                print!("{}", text);
+                return Ok(());
+            }
+            "symbol" => {
+                let name = match args.get(idx + 1) {
+                    Some(n) => n.clone(),
+                    None => {
+                        eprintln!("Error: symbol name required");
+                        std::process::exit(1);
+                    }
+                };
+                let path = args.get(idx + 2).cloned();
+                let (text, _) = symbol::execute_symbol(
+                    symbol::SymbolArgs {
+                        name,
+                        path,
+                        max_tokens: None,
+                    },
+                    working_dir.as_deref(),
+                );
+                print!("{}", text);
                 return Ok(());
             }
             _ => {}
