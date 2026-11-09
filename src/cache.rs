@@ -37,6 +37,12 @@ impl SessionCache {
     }
 
     #[allow(dead_code)]
+    pub fn invalidate(&mut self, path: &Path) {
+        let canonical_or_raw = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        self.entries.remove(&canonical_or_raw);
+    }
+
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.entries.clear();
     }

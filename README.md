@@ -1,14 +1,15 @@
 # Loupe v0
 
-A lightweight, zero-latency MCP code reader and symbol navigator designed to eliminate AI agent "windowed reads" (repeated 30–50 line reads with 7–13s thinking delays between hops) and "call-following" round trips.
+A lightweight, zero-latency MCP code reader, symbol navigator, and atomic batch editor designed to eliminate AI agent "windowed reads" (repeated 30–50 line reads with 7–13s thinking delays between hops), "call-following" round trips, and multi-turn brittle edit cycles.
 
-## The Three Core Tools
+## The Four Core Tools
 
 | Tool | Input | Output | What It Solves |
 |---|---|---|---|
 | `read_files` | `files: [{path, ranges?}]`, `max_tokens?` | Whole files or multiple requested line ranges formatted with line numbers. Deduplicates unchanged files across the session. | Stops repetitive 30–50 line chunking and re-reading unchanged code. |
 | `outline` | `path_or_glob`, `paths?`, `max_tokens?` | Symbols (`fn`, `struct`, `impl`, `enum`, `trait`, `class`, `interface`) with kind, signature, and exact line ranges (`L{start}-L{end}`). | Gives a fast architectural map without scanning raw source. |
 | `symbol` | `name`, `path?`, `max_tokens?` | Complete line-numbered body of the symbol, plus signatures of functions it calls (callees) and references where it is called (callers). | Eliminates "read-then-follow-the-call" hops. |
+| `edit_files` | `edits: [{path, symbol?, start_line?, end_line?, old_text?, replacement, create?}]`, `validate_syntax?`, `dry_run?` | Atomic multi-file changes with in-memory Tree-sitter syntax validation before disk writes. | Stops brittle string-replacement failures, multi-turn serial file editing, and broken syntax edit-test loops. |
 
 ---
 
@@ -41,6 +42,9 @@ The optimized binary is created at `target/release/loupe`.
 
 # Inspect symbol body, callees, and callers
 ./target/release/loupe symbol execute_outline
+
+# Edit symbol directly with syntax validation
+./target/release/loupe edit src/parser.rs --symbol SupportedLanguage::from_path --replace "..."
 ```
 
 ---

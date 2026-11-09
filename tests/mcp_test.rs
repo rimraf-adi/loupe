@@ -69,6 +69,7 @@ fn test_mcp_full_session_flow() {
     assert!(tools.iter().any(|t| t["name"] == "read_files"));
     assert!(tools.iter().any(|t| t["name"] == "outline"));
     assert!(tools.iter().any(|t| t["name"] == "symbol"));
+    assert!(tools.iter().any(|t| t["name"] == "edit_files"));
 
     // 3. Call read_files on both files in one batched call
     let call_req = json!({
@@ -165,6 +166,81 @@ fn test_mcp_full_session_flow() {
     assert!(symbol_text.contains("beta"));
     assert!(symbol_text.contains("Referenced by (callers):"));
     assert!(symbol_text.contains("let val = alpha();"));
+
+    // 7. Call edit_files via MCP to replace symbol 'beta' with AST syntax validation
+    let edit_req = json!({
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "tools/call",
+        "params": {
+            "name": "edit_files",
+            "arguments": {
+                "edits": [
+                    {
+                        "path": file_a.to_str().unwrap(),
+                        "symbol": "beta",
+                        "replacement": "pub fn beta() -> i32 {\n    999\n}"
+                    }
+                ],
+                "validate_syntax": true
+            }
+        }
+    });
+    writeln!(stdin, "{}", serde_json::to_string(&edit_req).unwrap()).unwrap();
+    line.clear();
+    reader.read_line(&mut line).unwrap();
+    let edit_resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(edit_resp["result"]["isError"], false);
+    let edit_text = edit_resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(edit_text.contains("Successfully updated 1 file(s)"));
+    assert!(edit_text.contains("Syntax Validated"));
+
+    // 8. Re-read file_a to verify updated content is returned
+    let reread_req = json!({
+        "jsonrpc": "2.0",
+        "id": 8,
+        "method": "tools/call",
+        "params": {
+            "name": "read_files",
+            "arguments": {
+                "files": [{ "path": file_a.to_str().unwrap() }]
+            }
+        }
+    });
+    writeln!(stdin, "{}", serde_json::to_string(&reread_req).unwrap()).unwrap();
+    line.clear();
+    reader.read_line(&mut line).unwrap();
+    let reread_resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let reread_text = reread_resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(reread_text.contains("999"));
+
+    // 9. Call edit_files with syntax error -> verify rejection and atomic rollback
+    let bad_edit_req = json!({
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "tools/call",
+        "params": {
+            "name": "edit_files",
+            "arguments": {
+                "edits": [
+                    {
+                        "path": file_a.to_str().unwrap(),
+                        "symbol": "beta",
+                        "replacement": "pub fn beta() -> i32 {\n    let bad = ;\n}"
+                    }
+                ],
+                "validate_syntax": true
+            }
+        }
+    });
+    writeln!(stdin, "{}", serde_json::to_string(&bad_edit_req).unwrap()).unwrap();
+    line.clear();
+    reader.read_line(&mut line).unwrap();
+    let bad_resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(bad_resp["result"]["isError"], true);
+    let bad_text = bad_resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(bad_text.contains("Syntax error"));
+    assert!(bad_text.contains("Atomic edit aborted"));
 
     drop(stdin);
     let _ = child.wait();

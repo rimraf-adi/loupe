@@ -1,4 +1,5 @@
 use crate::cache::SessionCache;
+use crate::editor::{execute_edit_files, EditFilesArgs};
 use crate::outline::{execute_outline, OutlineArgs};
 use crate::reader::{execute_read_files, ReadFilesArgs};
 use crate::symbol::{execute_symbol, SymbolArgs};
@@ -166,6 +167,41 @@ impl McpServer {
                                 },
                                 "required": ["name"]
                             }
+                        },
+                        {
+                            "name": "edit_files",
+                            "description": "Fast atomic batch editor for one or multiple files. Replaces code by AST symbol name, exact line range [start, end], text match, or writes full files. Features automatic in-memory Tree-sitter syntax validation before writing to disk with instant rollback if syntax is invalid.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "edits": {
+                                        "type": "array",
+                                        "description": "List of edits to apply atomically across files.",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "path": { "type": "string", "description": "Relative or absolute file path" },
+                                                "symbol": { "type": "string", "description": "Target symbol name (function, method, class, struct) to replace via AST" },
+                                                "start_line": { "type": "integer", "description": "1-indexed start line" },
+                                                "end_line": { "type": "integer", "description": "1-indexed end line (inclusive)" },
+                                                "old_text": { "type": "string", "description": "Exact text to find and replace" },
+                                                "replacement": { "type": "string", "description": "New replacement code" },
+                                                "create": { "type": "boolean", "description": "Create file if it does not exist" }
+                                            },
+                                            "required": ["path", "replacement"]
+                                        }
+                                    },
+                                    "validate_syntax": {
+                                        "type": "boolean",
+                                        "description": "If true (default), validates syntax using Tree-sitter before writing to disk and rolls back on error."
+                                    },
+                                    "dry_run": {
+                                        "type": "boolean",
+                                        "description": "If true, previews changes without writing to disk."
+                                    }
+                                },
+                                "required": ["edits"]
+                            }
                         }
                     ]
                 });
@@ -287,6 +323,65 @@ impl McpServer {
                                     {
                                         "type": "text",
                                         "text": format!("Invalid arguments for symbol: {}", e)
+                                    }
+                                ],
+                                "isError": true
+                            });
+                            Some(JsonRpcResponse {
+                                jsonrpc: "2.0",
+                                id,
+                                result: Some(err_res),
+                                error: None,
+                            })
+                        }
+                    },
+                    "edit_files" => match serde_json::from_value::<EditFilesArgs>(arguments) {
+                        Ok(args) => {
+                            let res = execute_edit_files(
+                                args,
+                                &mut self.cache,
+                                self.working_dir.as_deref(),
+                            );
+                            let text = if res.success {
+                                let mut out = format!("{}\n", res.message);
+                                for item in &res.files_modified {
+                                    let val_status = item
+                                        .syntax_validated
+                                        .as_ref()
+                                        .map(|v| format!(" [✓ Syntax Validated: {}]", v))
+                                        .unwrap_or_default();
+                                    out.push_str(&format!(
+                                        "  - {}: {} ({} -> {} lines){}\n",
+                                        item.path, item.details, item.original_lines, item.new_lines, val_status
+                                    ));
+                                }
+                                out
+                            } else {
+                                format!("Edit Error: {}\n", res.message)
+                            };
+
+                            let tool_res = json!({
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": text
+                                    }
+                                ],
+                                "isError": !res.success
+                            });
+                            Some(JsonRpcResponse {
+                                jsonrpc: "2.0",
+                                id,
+                                result: Some(tool_res),
+                                error: None,
+                            })
+                        }
+                        Err(e) => {
+                            let err_res = json!({
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": format!("Invalid arguments for edit_files: {}", e)
                                     }
                                 ],
                                 "isError": true
